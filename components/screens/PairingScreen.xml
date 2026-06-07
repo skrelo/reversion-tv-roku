@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<!-- Pairing / device-auth. TV_APP_SPEC §5: code (dash-grouped) + QR (~58% of
+     screen height) + countdown (auto-regen on expiry) + poll loop. -->
+<component name="PairingScreen" extends="Group">
+    <interface>
+        <!-- MainScene observes this; set true once a token is persisted. -->
+        <field id="paired" type="boolean" value="false" />
+    </interface>
+
+    <children>
+        <Poster id="bg" width="1920" height="1080" uri="pkg:/images/home_bg_fhd.jpg" loadDisplayMode="scaleToZoom" />
+        <Rectangle id="scrim" width="1920" height="1080" color="0x0A1A2FCC" />
+
+        <!-- Left column: branding + instructions + code + countdown -->
+        <Poster id="brand" uri="pkg:/images/brand_logo.png" translation="[140,120]" width="300" height="248" loadDisplayMode="scaleToFit" />
+
+        <Label id="heading" text="Pair this TV" translation="[140,420]"
+               width="760" font="font:LargeBoldSystemFont" color="0xFFFFFFFF" />
+
+        <Label id="instructions" translation="[140,510]" width="760" wrap="true"
+               font="font:MediumSystemFont" color="0xC9D4E5FF"
+               text="On any browser, go to reversion.app/activate and enter the code below." />
+
+        <Label id="codeCaption" text="YOUR CODE" translation="[140,640]" width="760"
+               font="font:SmallBoldSystemFont" color="0xCBA14BFF" />
+        <Label id="code" text="" translation="[140,675]" width="760"
+               font="font:LargeBoldSystemFont" color="0xFFFFFFFF" />
+
+        <Label id="countdown" text="" translation="[140,800]" width="760"
+               font="font:MediumSystemFont" color="0xC9D4E5FF" />
+
+        <!-- Hard-error retry affordance (hidden unless a non-transient error). -->
+        <Group id="errorGroup" translation="[140,870]" visible="false">
+            <Label id="errorMsg" width="760" wrap="true" font="font:MediumSystemFont"
+                   color="0xFF8A8AFF" text="Something went wrong reaching the server." />
+            <Button id="retryBtn" text="Retry" translation="[0,70]" minWidth="220" />
+        </Group>
+
+        <!-- Right column: QR card. ~58% of 1080 ≈ 626 px. -->
+        <Rectangle id="qrCard" width="660" height="660" color="0xFFFFFFFF" translation="[1090,210]">
+            <Label id="qrCaption" text="Or scan to pair" translation="[0,600]" width="660"
+                   horizAlign="center" font="font:MediumBoldSystemFont" color="0x0A1A2FFF" />
+        </Rectangle>
+        <QRCode id="qr" ecl="MEDIUM" border="2" pixel="16"
+                width="560" height="560" loadDisplayMode="scaleToFit"
+                translation="[1140,240]" />
+    </children>
+
+    <script type="text/brightscript" uri="pkg:/components/screens/PairingScreen.brs" />
+    <script type="text/brightscript" uri="pkg:/components/lib/Config.brs" />
+    <script type="text/brightscript" uri="pkg:/components/lib/Registry.brs" />
+    <script type="text/brightscript" uri="pkg:/components/lib/Api.brs" />
+</component>

@@ -1,0 +1,5 @@
+.DS_Store
+out/
+*.zip
+node_modules/
+.vscode/launch.json

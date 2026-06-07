@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<!-- Generic async HTTP task. All networking runs off the render thread.
+     TV_APP_SPEC §2 (Bearer auth, 401 handling, 3x retry/backoff), §4 (contract). -->
+<component name="ApiTask" extends="Task">
+    <interface>
+        <!-- input: { method, path, body (assocarray|invalid), needsAuth (bool) } -->
+        <field id="request" type="assocarray" />
+        <!-- output: { ok (bool), status (int), data (assocarray), error (string) } -->
+        <field id="response" type="assocarray" />
+    </interface>
+    <script type="text/brightscript" uri="pkg:/components/tasks/ApiTask.brs" />
+    <script type="text/brightscript" uri="pkg:/components/lib/Config.brs" />
+    <script type="text/brightscript" uri="pkg:/components/lib/Registry.brs" />
+</component>

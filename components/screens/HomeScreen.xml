@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<!-- Placeholder Home. Validates the authed API round-trip (GET /me) and the
+     sign-out path (§10.5). The full Home (left nav + hero + rails + catalog,
+     §6) is built in a later pass. -->
+<component name="HomeScreen" extends="Group">
+    <interface>
+        <field id="signedOut" type="boolean" value="false" />
+    </interface>
+
+    <children>
+        <Poster id="bg" width="1920" height="1080" uri="pkg:/images/home_bg_fhd.jpg" loadDisplayMode="scaleToZoom" />
+        <Rectangle id="scrim" width="1920" height="1080" color="0x0A1A2FAA" />
+
+        <Label id="welcome" text="Welcome" translation="[140,160]" width="1200"
+               font="font:LargeBoldSystemFont" color="0xFFFFFFFF" />
+        <Label id="subtitle" text="Loading your account…" translation="[140,250]" width="1200"
+               font="font:MediumSystemFont" color="0xC9D4E5FF" />
+        <Label id="note" translation="[140,340]" width="1400" wrap="true"
+               font="font:SmallestSystemFont" color="0x8FA0B8FF"
+               text="Home (nav, hero carousel, rails, catalog) is under construction. Pairing and the API client are wired to production." />
+
+        <Button id="signOutBtn" text="Sign out" translation="[140,520]" minWidth="260" />
+    </children>
+
+    <script type="text/brightscript" uri="pkg:/components/screens/HomeScreen.brs" />
+    <script type="text/brightscript" uri="pkg:/components/lib/Config.brs" />
+    <script type="text/brightscript" uri="pkg:/components/lib/Registry.brs" />
+    <script type="text/brightscript" uri="pkg:/components/lib/Api.brs" />
+</component>

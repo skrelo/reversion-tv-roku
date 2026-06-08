@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<!-- Hero: carousel (expanded) + spotlight (collapsed) in one node. Mirrors the
+     Tizen Hero.jsx / Home.css composition: full-bleed backdrop, 14% darken, a
+     bottom-left content scrim (Roku can't do per-text drop-shadow), a bottom
+     fade to navy, then a LEFT-anchored stacked content column. The backdrop
+     crossfades between slides/spotlights. `heroHeight` is animated by
+     HomeScreen (918<->648); all hero layers track it. §6.2/§6.3. -->
+<component name="HeroView" extends="Group">
+    <interface>
+        <field id="mode" type="string" value="carousel" onChange="render" /> <!-- carousel | spotlight -->
+        <field id="slide" type="assocarray" onChange="render" />     <!-- HeroSlideModel -->
+        <field id="spotlight" type="assocarray" onChange="render" /> <!-- SpotlightModel -->
+        <field id="slideCount" type="integer" value="1" />
+        <field id="slideIndex" type="integer" value="0" />
+        <field id="inMyList" type="boolean" value="false" />
+        <field id="focusedButton" type="integer" value="-1" onChange="updateButtons" />
+        <field id="heroHeight" type="float" value="918" onChange="onHeightChanged" />
+    </interface>
+
+    <children>
+        <Rectangle id="backdropBg" width="1920" height="918" color="0x0F1923FF" />
+        <Poster id="backdropA" width="1920" height="918" loadDisplayMode="scaleToZoom" />
+        <Poster id="backdropB" width="1920" height="918" loadDisplayMode="scaleToZoom" opacity="0" />
+        <!-- 14% wash for contrast (mirrors .hero-darken). -->
+        <Rectangle id="darken" width="1920" height="918" color="0x00000024" />
+        <!-- Bottom-left legibility scrim (anchored to the hero bottom). -->
+        <Poster id="scrim" width="1280" height="820" uri="pkg:/images/hero_scrim.png" />
+        <!-- Bottom fade to navy, stretched to the live hero height. -->
+        <Poster id="fade" width="1920" height="918" uri="pkg:/images/hero_fade.png" />
+
+        <!-- Carousel wordmark: centered across the hero, pinned near the top
+             (mirrors Tizen .hero-wordmark). The CDN pads it onto an exact
+             transparent canvas so it's truly centered; size/uri set in BRS. -->
+        <Poster id="wordmark" loadDisplayMode="scaleToFit" opacity="0" visible="false" />
+
+        <!-- LEFT-anchored stacked content column (built in BRS). -->
+        <LayoutGroup id="content" translation="[150,300]" layoutDirection="vert" horizAlignment="left" itemSpacings="[14]" />
+
+        <!-- Carousel dots (bottom-center; built in BRS). -->
+        <LayoutGroup id="dots" translation="[0,874]" layoutDirection="horiz" itemSpacings="[12]" />
+
+        <Animation id="fadeAnim" duration="0.32" easeFunction="outQuad">
+            <FloatFieldInterpolator id="fadeInInterp" key="[0,1]" keyValue="[0,1]" fieldToInterp="backdropB.opacity" />
+        </Animation>
+
+        <!-- Content slide-in: the new slide's column glides in from the right
+             and fades up, so paging/auto-advance reads as a slideshow (the
+             backdrop crossfades underneath). Mirrors Tizen's heroSlideFade. -->
+        <Animation id="contentAnim" duration="0.34" easeFunction="outQuad">
+            <FloatFieldInterpolator id="contentOpacInterp" key="[0,1]" keyValue="[0,1]" fieldToInterp="content.opacity" />
+            <FloatFieldInterpolator id="wordmarkOpacInterp" key="[0,1]" keyValue="[0,1]" fieldToInterp="wordmark.opacity" />
+        </Animation>
+    </children>
+
+    <script type="text/brightscript" uri="pkg:/components/home/HeroView.brs" />
+    <script type="text/brightscript" uri="pkg:/components/lib/Models.brs" />
+</component>

@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<!-- One content rail: a title + a horizontal row of RailCards. Renders from
+     `rail` ({title, items[], type}); `focusedCol` drives card highlight +
+     horizontal scroll (-1 = rail not focused). TV_APP_SPEC §6.5. -->
+<component name="Rail" extends="Group">
+    <interface>
+        <field id="rail" type="assocarray" onChange="renderRail" />
+        <field id="focusedCol" type="integer" value="-1" onChange="updateFocus" />
+        <field id="itemCount" type="integer" value="0" />
+    </interface>
+
+    <children>
+        <Label id="title" width="1700" translation="[0,0]" color="0x8C9EB0FF">
+            <Font role="font" uri="pkg:/fonts/Montserrat-Bold.ttf" size="21" />
+        </Label>
+        <Group id="cardsRow" translation="[0,48]" />
+
+        <Animation id="scrollAnim" duration="0.3" easeFunction="outCubic">
+            <Vector2DFieldInterpolator id="scrollInterp" key="[0,1]" fieldToInterp="cardsRow.translation" />
+        </Animation>
+    </children>
+
+    <script type="text/brightscript" uri="pkg:/components/home/Rail.brs" />
+    <script type="text/brightscript" uri="pkg:/components/lib/Models.brs" />
+</component>

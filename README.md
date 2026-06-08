@@ -45,16 +45,34 @@ scripts/package.sh             build sideload zip
 
 ## Build / sideload
 
-1. Enable **Developer Mode** on the Roku (Home ×3, Up ×2, Right, Left, Right,
-   Left, Right) and note the device IP + the dev password you set.
-2. Build the package:
+First time only, install the validator:
 
 ```bash
-bash scripts/package.sh
+npm install
 ```
 
-3. Open `http://<roku-ip>` in a browser, sign in with the dev password, and
-   upload `out/reversion-tv-roku.zip` on the **Installer** page (Replace).
+Then build (validates the BrightScript/SceneGraph, then zips):
+
+```bash
+npm run build          # validate + package → out/reversion-tv-roku.zip
+# or:
+bash scripts/build.sh
+bash scripts/build.sh --skip-validate   # zip only, no validation
+```
+
+`npm run build` aborts with the error list if validation fails, so a bad zip
+never gets produced. Other scripts:
+
+| Command | What it does |
+|---|---|
+| `npm run build` | Validate + package (the normal command) |
+| `npm run validate` | Validate only (`bsc`, reads `bsconfig.json`) |
+| `npm run package` | Zip only, skip validation |
+| `npm run gen-icons` | Regenerate `images/icons/*` from the SVG glyphs |
+
+Sideload to a Roku in Developer Mode: open `http://<roku-ip>`, sign in with the
+dev password, and upload `out/reversion-tv-roku.zip` on the **Installer** page
+(Replace).
 
 The channel boots to Pairing when there's no token, or to Home when a token is
 stored.

@@ -1,0 +1,16 @@
+{
+  "name": "reversion-tv-roku",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Reversion TV — Roku (BrightScript/SceneGraph) port",
+  "scripts": {
+    "validate": "bsc",
+    "build": "bash scripts/build.sh",
+    "package": "bash scripts/package.sh",
+    "gen-icons": "node scripts/gen_icons.mjs"
+  },
+  "devDependencies": {
+    "@resvg/resvg-js": "^2.6.2",
+    "brighterscript": "^0.69.0"
+  }
+}

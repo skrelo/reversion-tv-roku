@@ -4,10 +4,11 @@
 <component name="MainScene" extends="Scene">
     <interface>
         <field id="launchArgs" type="assocarray" />
+        <field id="exitApp" type="boolean" value="false" />
     </interface>
 
     <children>
-        <Rectangle id="bg" width="1920" height="1080" color="0x0A1A2FFF" />
+        <Rectangle id="bg" width="1920" height="1080" color="0x0F1923FF" />
         <Group id="screenHost" />
     </children>
 

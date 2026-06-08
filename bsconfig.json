@@ -1,0 +1,12 @@
+{
+    "files": [
+        "manifest",
+        "source/**/*",
+        "components/**/*",
+        "images/**/*",
+        "fonts/**/*"
+    ],
+    "createPackage": false,
+    "copyToStaging": false,
+    "diagnosticLevel": "warn"
+}

@@ -1,0 +1,108 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<!-- Event Detail (TV_APP_SPEC §7). Backdrop + TOP-CENTRE wordmark, a two-column
+     bottom band (LEFT = watch-target + [Watch/Continue][+My List]; RIGHT =
+     tagline -> focusable description -> meta), a single "Videos" rail, and the
+     shared left nav. Description OK opens a full-text modal. All D-pad routing
+     is explicit (this screen owns focus; children render highlight from state)
+     mirroring Home (§12). No Player yet -> Watch/video OK shows a toast. -->
+<component name="EventDetailScreen" extends="Group">
+    <interface>
+        <field id="eventId" type="string" value="" onChange="onEventIdSet" />
+        <field id="signedOut" type="boolean" value="false" />
+        <field id="popped" type="boolean" value="false" />
+        <!-- A related/event card could open another detail; MainScene observes. -->
+        <field id="openEventId" type="string" value="" />
+        <!-- Watch / video-card OK opens the Player; MainScene observes. -->
+        <field id="openVideoId" type="string" value="" />
+    </interface>
+
+    <children>
+        <Rectangle id="bg" width="1920" height="1080" color="0x0F1923FF" />
+
+        <!-- ── Hero (fixed ~700 tall; the Videos rail sits below) ───────── -->
+        <Group id="heroGroup">
+            <Rectangle id="backdropBg" width="1920" height="700" color="0x0F1923FF" />
+            <Poster id="backdrop" width="1920" height="700" loadDisplayMode="scaleToZoom" />
+            <Rectangle id="darken" width="1920" height="700" color="0x00000024" />
+            <Poster id="scrim" width="1280" height="700" translation="[0,0]" uri="pkg:/images/hero_scrim.png" />
+            <Poster id="fade" width="1920" height="700" uri="pkg:/images/hero_fade.png" />
+
+            <!-- Top-centre wordmark (CDN-padded); size/uri/translation in BRS. -->
+            <Poster id="wordmark" loadDisplayMode="scaleToFit" opacity="0" visible="false" />
+            <!-- Serif title fallback when there's no wordmark. -->
+            <Label id="titleFallback" translation="[150,150]" width="1400" wrap="true" maxLines="2" visible="false" color="0xFFFFFFFF">
+                <Font role="font" uri="pkg:/fonts/Montserrat-Bold.ttf" size="72" />
+            </Label>
+
+            <!-- LEFT column: watch-target one-liner + action row. Bottom-anchored
+                 (translation set in BRS after measuring). -->
+            <LayoutGroup id="leftCol" translation="[150,420]" layoutDirection="vert" horizAlignment="left" itemSpacings="[18]" opacity="0" />
+
+            <!-- RIGHT column: tagline -> description block -> meta. -->
+            <LayoutGroup id="rightCol" translation="[980,420]" layoutDirection="vert" horizAlignment="left" itemSpacings="[14]" opacity="0" />
+
+            <Animation id="bandAnim" duration="0.3" easeFunction="outQuad">
+                <FloatFieldInterpolator id="leftOpac" key="[0,1]" keyValue="[0,1]" fieldToInterp="leftCol.opacity" />
+                <FloatFieldInterpolator id="rightOpac" key="[0,1]" keyValue="[0,1]" fieldToInterp="rightCol.opacity" />
+                <FloatFieldInterpolator id="wmOpac" key="[0,1]" keyValue="[0,1]" fieldToInterp="wordmark.opacity" />
+            </Animation>
+        </Group>
+
+        <!-- ── Videos rail ──────────────────────────────────────────────── -->
+        <Group id="railContainer" translation="[150,732]">
+            <Rail id="videosRail" />
+        </Group>
+
+        <!-- Left nav over content. -->
+        <HomeNav id="nav" />
+
+        <!-- States. -->
+        <Group id="loading" translation="[960,540]" visible="false">
+            <Label text="Loading…" translation="[-100,0]" width="200" horizAlign="center" color="0xF0EBE3FF">
+                <Font role="font" uri="pkg:/fonts/Montserrat-Regular.ttf" size="28" />
+            </Label>
+        </Group>
+        <Label id="errorLabel" translation="[200,500]" width="1520" horizAlign="center" wrap="true" visible="false" color="0xFF8A8AFF">
+            <Font role="font" uri="pkg:/fonts/Montserrat-Regular.ttf" size="30" />
+        </Label>
+        <Label id="emptyLabel" translation="[200,760]" width="1520" visible="false" color="0x8C9EB0FF" text="No videos in this event yet.">
+            <Font role="font" uri="pkg:/fonts/Montserrat-Regular.ttf" size="26" />
+        </Label>
+
+        <!-- Toast. -->
+        <Group id="toast" translation="[0,960]" visible="false">
+            <Rectangle id="toastBg" width="560" height="70" translation="[680,0]" color="0x23324AF2">
+                <Label id="toastLabel" width="560" height="70" horizAlign="center" vertAlign="center" color="0xFFFFFFFF">
+                    <Font role="font" uri="pkg:/fonts/Montserrat-SemiBold.ttf" size="26" />
+                </Label>
+            </Rectangle>
+        </Group>
+
+        <!-- Full-description modal (right sheet). Body scrolls via clippingRect. -->
+        <Group id="descModal" visible="false">
+            <Rectangle id="modalScrim" width="1920" height="1080" color="0x040810B0" />
+            <Rectangle id="modalPanel" width="780" height="1080" translation="[1140,0]" color="0x121C28FF">
+                <Label id="modalTitle" translation="[64,72]" width="660" wrap="true" maxLines="3" color="0xFFFFFFFF">
+                    <Font role="font" uri="pkg:/fonts/Montserrat-Bold.ttf" size="38" />
+                </Label>
+                <Label id="modalMeta" translation="[64,210]" width="660" color="0x8C9EB0FF">
+                    <Font role="font" uri="pkg:/fonts/Montserrat-Regular.ttf" size="20" />
+                </Label>
+                <Label id="modalTagline" translation="[64,250]" width="660" wrap="true" maxLines="2" color="0xC9A84CFF">
+                    <Font role="font" uri="pkg:/fonts/Montserrat-SemiBold.ttf" size="24" />
+                </Label>
+                <Group id="modalBodyClip" translation="[64,330]" clippingRect="[0,0,660,660]">
+                    <Label id="modalBody" width="660" wrap="true" maxLines="200" color="0xF2F2F2FF">
+                        <Font role="font" uri="pkg:/fonts/Montserrat-Regular.ttf" size="23" lineSpacing="6" />
+                    </Label>
+                </Group>
+            </Rectangle>
+        </Group>
+    </children>
+
+    <script type="text/brightscript" uri="pkg:/components/screens/EventDetailScreen.brs" />
+    <script type="text/brightscript" uri="pkg:/components/lib/Config.brs" />
+    <script type="text/brightscript" uri="pkg:/components/lib/Registry.brs" />
+    <script type="text/brightscript" uri="pkg:/components/lib/Api.brs" />
+    <script type="text/brightscript" uri="pkg:/components/lib/Models.brs" />
+</component>

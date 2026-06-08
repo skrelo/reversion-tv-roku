@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<!-- Left nav (TV_APP_SPEC §6.6). Collapsed icon strip over the full-bleed
+     hero; expands on focus with gradient + labels + profile + brand lockup.
+     Gradient/labels/profile/brand render ONLY when expanded. Driven by
+     `expanded`, `focusedIndex`, `activeId`, `userName`, `userHandle`. -->
+<component name="HomeNav" extends="Group">
+    <interface>
+        <field id="expanded" type="boolean" value="false" onChange="updateExpanded" />
+        <field id="focusedIndex" type="integer" value="-1" onChange="updateFocus" />
+        <field id="activeId" type="string" value="home" onChange="updateActive" />
+        <field id="userName" type="string" value="Account" onChange="updateProfile" />
+        <field id="userHandle" type="string" value="" onChange="updateProfile" />
+        <field id="userPhoto" type="string" value="" />
+    </interface>
+
+    <children>
+        <Poster id="gradient" uri="pkg:/images/nav_gradient.png" width="600" height="1080" visible="false" />
+
+        <!-- Focus pill: translucent white, matches Tizen .nav-item.focused. -->
+        <Rectangle id="hl" width="330" height="64" translation="[20,200]" color="0xFFFFFF33" visible="false" />
+
+        <!-- Profile (expanded only). -->
+        <Group id="profile" translation="[36,72]" visible="false">
+            <Poster id="avatar" width="64" height="64" uri="pkg:/images/avatar_circle.png" blendColor="0x23324AFF">
+                <Label id="avatarInitial" width="64" height="64" horizAlign="center" vertAlign="center" color="0xC9A84CFF">
+                    <Font role="font" uri="pkg:/fonts/Montserrat-Bold.ttf" size="30" />
+                </Label>
+            </Poster>
+            <Label id="profileName" translation="[80,8]" width="260" color="0xFFFFFFFF" maxLines="1">
+                <Font role="font" uri="pkg:/fonts/Montserrat-SemiBold.ttf" size="24" />
+            </Label>
+            <Label id="profileHandle" translation="[80,38]" width="260" color="0x8C9EB0FF" maxLines="1">
+                <Font role="font" uri="pkg:/fonts/Montserrat-Regular.ttf" size="19" />
+            </Label>
+        </Group>
+
+        <Group id="itemHost" />
+
+        <Poster id="brand" uri="pkg:/images/brand_lockup.png" translation="[36,968]"
+                width="280" height="108" loadDisplayMode="scaleToFit" visible="false" />
+    </children>
+
+    <script type="text/brightscript" uri="pkg:/components/home/HomeNav.brs" />
+</component>

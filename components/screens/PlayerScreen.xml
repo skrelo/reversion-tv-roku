@@ -1,0 +1,179 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<!-- Player (TV_APP_SPEC §9). Full-bleed native HLS Video with fully custom D-pad
+     chrome (no stock controller UI). Phase 1: load/resume/progress, transport
+     chrome (icon row, scrub, pills), focus zones (icons/scrub/pills), single-tap
+     + hold-to-seek with N× indicator, and the Netflix-style pause overlay with
+     double-back. Markers / pop-ups / QR note / settings / Up-Next land in later
+     passes. All key routing is explicit; this screen owns focus. -->
+<component name="PlayerScreen" extends="Group">
+    <interface>
+        <field id="videoId" type="string" value="" onChange="onVideoIdSet" />
+        <field id="popped" type="boolean" value="false" />
+        <field id="signedOut" type="boolean" value="false" />
+    </interface>
+
+    <children>
+        <!-- enableUI=false suppresses Roku's built-in player UI (progress/trickplay
+             bar + the title-top-left / clock-top-right overlay). All chrome here
+             is hand-drawn (§9). -->
+        <Video id="video" width="1920" height="1080" translation="[0,0]" enableUI="false" />
+
+        <!-- Netflix pause overlay: dim scrim + left-aligned event wordmark
+             (title fallback). No auto-hide; resume clears it. §9.10 -->
+        <Rectangle id="pauseScrim" width="1920" height="1080" color="0x000000A6" visible="false" />
+        <Poster id="pauseWordmark" loadDisplayMode="scaleToFit" visible="false" />
+        <Label id="pauseTitle" translation="[150,360]" width="1000" wrap="true" maxLines="3" visible="false" color="0xFFFFFFFF">
+            <Font role="font" uri="pkg:/fonts/Montserrat-Bold.ttf" size="64" />
+        </Label>
+
+        <Label id="loading" translation="[0,500]" width="1920" horizAlign="center" color="0xCFD8E3FF" text="Loading…">
+            <Font role="font" uri="pkg:/fonts/Montserrat-SemiBold.ttf" size="34" />
+        </Label>
+
+        <Label id="errorLabel" translation="[260,470]" width="1400" horizAlign="center" wrap="true" maxLines="3" visible="false" color="0xFFFFFFFF">
+            <Font role="font" uri="pkg:/fonts/Montserrat-SemiBold.ttf" size="34" />
+        </Label>
+
+        <!-- Center play/pause flash glyph (Polish). -->
+        <Poster id="flash" width="120" height="120" translation="[900,480]" visible="false" blendColor="0xFFFFFFFF" />
+
+        <!-- Hold-to-seek N× indicator (chevron + rate). -->
+        <Group id="seekIndicator" translation="[880,470]" visible="false">
+            <Poster id="seekChevron" width="56" height="56" translation="[0,4]" blendColor="0xFFFFFFFF" />
+            <Label id="seekRate" translation="[64,0]" width="160" color="0xFFFFFFFF">
+                <Font role="font" uri="pkg:/fonts/Montserrat-Bold.ttf" size="48" />
+            </Label>
+        </Group>
+
+        <!-- Transport chrome (fades in/out). Bottom-anchored, mirroring Tizen:
+             titles+icons row → [markers strip, later pass] → scrub → times →
+             centered pills. -->
+        <Group id="chrome" opacity="0">
+            <Poster id="chromeScrim" width="1920" height="560" translation="[0,520]" uri="pkg:/images/hero_fade.png" />
+
+            <!-- Titles (lower-left, above the future markers strip) + icon row
+                 (right, both built/positioned in BRS). -->
+            <Label id="eventTitle" translation="[150,720]" width="1200" maxLines="1" color="0xC9A84CFF">
+                <Font role="font" uri="pkg:/fonts/Montserrat-Bold.ttf" size="24" />
+            </Label>
+            <Label id="videoTitle" translation="[150,750]" width="1200" maxLines="1" color="0xFFFFFFFF">
+                <Font role="font" uri="pkg:/fonts/Montserrat-SemiBold.ttf" size="40" />
+            </Label>
+            <!-- Icon row: round buttons anchored top-right, tooltip beneath each
+                 (built + positioned in BRS). §9.3 -->
+            <Group id="iconRow" />
+
+            <!-- Notes & Annotations (N/A) strip: horizontal chip carousel, merged
+                 + sorted by timecode. Clipped + scrolled horizontally in BRS. §9.6 -->
+            <Group id="markersClip" translation="[150,820]" clippingRect="[0,0,1620,84]">
+                <Group id="markersRow" />
+            </Group>
+
+            <!-- Scrub bar. -->
+            <Group id="scrub" translation="[150,914]">
+                <Rectangle id="scrubTrack" width="1620" height="6" color="0xFFFFFF40" />
+                <Rectangle id="scrubPlayed" width="0" height="6" color="0xC9A84CFF" />
+                <Rectangle id="scrubKnob" width="22" height="22" translation="[-11,-8]" color="0xC9A84CFF" visible="false" />
+            </Group>
+            <Label id="timeElapsed" translation="[150,936]" width="300" color="0xE7ECF2FF">
+                <Font role="font" uri="pkg:/fonts/Montserrat-SemiBold.ttf" size="26" />
+            </Label>
+            <Label id="timeRemaining" translation="[1470,936]" width="300" horizAlign="right" color="0xE7ECF2FF">
+                <Font role="font" uri="pkg:/fonts/Montserrat-SemiBold.ttf" size="26" />
+            </Label>
+
+            <!-- Chapter-select flash: brief timecode+name bubble + tick above the
+                 scrub at the chapter's position, fades ~2s. §9.2 (positioned in BRS). -->
+            <Group id="chapterFlash" visible="false">
+                <Rectangle id="chapterFlashTick" width="3" height="22" color="0xC9A84CFF" />
+                <Poster id="chapterFlashBg" uri="pkg:/images/btn_rounded.9.png" blendColor="0x141D28F2" height="48" />
+                <Label id="chapterFlashLabel" translation="[16,0]" height="48" vertAlign="center" color="0xFFFFFFFF">
+                    <Font role="font" uri="pkg:/fonts/Montserrat-SemiBold.ttf" size="24" />
+                </Label>
+            </Group>
+
+            <!-- Playback pills (built + centered in BRS). -->
+            <LayoutGroup id="pills" translation="[150,980]" layoutDirection="horiz" itemSpacings="[20]" />
+        </Group>
+
+        <!-- Ambient auto pop-up (top-left, non-focusable). Built in BRS. §9.6 -->
+        <Group id="popup" translation="[80,70]" visible="false" />
+
+        <!-- Marker detail card (centered modal; pauses video). Panel built in
+             BRS. §9.8 -->
+        <Group id="detailModal" visible="false">
+            <Rectangle id="detailScrim" width="1920" height="1080" color="0x040810B3" />
+            <Group id="detailPanel" />
+        </Group>
+
+        <!-- Full-screen image viewer (§9.9). -->
+        <Group id="imageViewer" visible="false">
+            <Rectangle width="1920" height="1080" color="0x000000EB" />
+            <Poster id="viewerImg" width="1600" height="860" translation="[160,110]" loadDisplayMode="scaleToFit" />
+            <Label id="viewerCounter" translation="[0,980]" width="1920" horizAlign="center" color="0xFFFFFFFF">
+                <Font role="font" uri="pkg:/fonts/Montserrat-SemiBold.ttf" size="26" />
+            </Label>
+            <Label id="viewerHint" translation="[0,40]" width="1860" horizAlign="right" color="0x9FB0C0FF" text="BACK or OK to close">
+                <Font role="font" uri="pkg:/fonts/Montserrat-Regular.ttf" size="20" />
+            </Label>
+        </Group>
+
+        <!-- Full-screen text reader for long bodies (§9.8). -->
+        <Group id="textReader" visible="false">
+            <Rectangle width="1920" height="1080" color="0x040810E6" />
+            <Rectangle width="1180" height="900" translation="[370,90]" color="0x141D28FF">
+                <Label id="readerTitle" translation="[56,48]" width="1068" wrap="true" maxLines="2" color="0xFFFFFFFF">
+                    <Font role="font" uri="pkg:/fonts/Montserrat-Bold.ttf" size="34" />
+                </Label>
+                <Group id="readerClip" translation="[56,160]" clippingRect="[0,0,1068,720]">
+                    <Label id="readerBody" width="1068" wrap="true" maxLines="400" color="0xF2F2F2F2">
+                        <Font role="font" uri="pkg:/fonts/Montserrat-Regular.ttf" size="24" lineSpacing="8" />
+                    </Label>
+                </Group>
+            </Rectangle>
+            <Label translation="[370,1004]" width="1180" horizAlign="center" color="0x9FB0C0FF" text="UP / DOWN to scroll · BACK to close">
+                <Font role="font" uri="pkg:/fonts/Montserrat-Regular.ttf" size="20" />
+            </Label>
+        </Group>
+
+        <!-- Chapters pop-up (right sheet): scrollable timecode+title list. The
+             only chapter-navigation surface. §9.2 -->
+        <Group id="chaptersModal" visible="false">
+            <Rectangle id="chaptersScrim" width="1920" height="1080" color="0x040810B0" />
+            <Rectangle id="chaptersPanel" width="780" height="1080" translation="[1140,0]" color="0x121C28FF">
+                <Label id="chaptersTitle" translation="[64,72]" width="660" color="0xFFFFFFFF" text="Chapters">
+                    <Font role="font" uri="pkg:/fonts/Montserrat-Bold.ttf" size="38" />
+                </Label>
+                <Group id="chaptersClip" translation="[64,170]" clippingRect="[0,0,680,840]">
+                    <LayoutGroup id="chaptersList" layoutDirection="vert" itemSpacings="[6]" />
+                </Group>
+            </Rectangle>
+        </Group>
+
+        <!-- Chrome fade animations. §9.3 (in ~180ms / out ~240ms). -->
+        <Animation id="chromeFadeIn" duration="0.18" easeFunction="outQuad">
+            <FloatFieldInterpolator id="chromeFadeInInterp" key="[0,1]" keyValue="[0,1]" fieldToInterp="chrome.opacity" />
+        </Animation>
+        <Animation id="chromeFadeOut" duration="0.24" easeFunction="outQuad">
+            <FloatFieldInterpolator id="chromeFadeOutInterp" key="[0,1]" keyValue="[1,0]" fieldToInterp="chrome.opacity" />
+        </Animation>
+
+        <!-- Smooth horizontal scroll for the N/A strip (no snapping). §9.6 -->
+        <Animation id="markersScrollAnim" duration="0.26" easeFunction="outCubic">
+            <Vector2DFieldInterpolator id="markersScrollInterp" key="[0,1]" keyValue="[[0,0],[0,0]]" fieldToInterp="markersRow.translation" />
+        </Animation>
+
+        <Timer id="hideTimer" duration="5" repeat="false" />
+        <Timer id="indicatorTimer" duration="0.6" repeat="false" />
+        <Timer id="flashTimer" duration="0.7" repeat="false" />
+        <Timer id="saveTimer" duration="10" repeat="true" />
+        <Timer id="chapterFlashTimer" duration="2" repeat="false" />
+        <Timer id="popupTimer" duration="6" repeat="false" />
+    </children>
+
+    <script type="text/brightscript" uri="pkg:/components/screens/PlayerScreen.brs" />
+    <script type="text/brightscript" uri="pkg:/components/lib/Config.brs" />
+    <script type="text/brightscript" uri="pkg:/components/lib/Registry.brs" />
+    <script type="text/brightscript" uri="pkg:/components/lib/Api.brs" />
+    <script type="text/brightscript" uri="pkg:/components/lib/Models.brs" />
+</component>

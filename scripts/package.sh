@@ -9,7 +9,7 @@ mkdir -p out
 OUT="out/reversion-tv-roku.zip"
 rm -f "$OUT"
 
-zip -r -q "$OUT" manifest source components images \
+zip -r -q "$OUT" manifest source components images fonts \
     -x '*.DS_Store'
 
 echo "Built $OUT"

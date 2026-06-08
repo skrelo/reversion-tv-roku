@@ -1,0 +1,61 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<!-- One rail card. Mirrors Tizen Card.jsx: 16:9 art (sharp corners), baked
+     poster OR wordmark/overlay title over a soft bottom gradient, NEW/EVENT/
+     VIDEO badge, CW play glyph, RED progress bar (§6.5), 4px gold focus frame
+     + animated 1.08 scale. Renders from `model` + `focused`. -->
+<component name="RailCard" extends="Group">
+    <interface>
+        <field id="model" type="assocarray" onChange="render" />
+        <field id="focused" type="boolean" value="false" onChange="onFocusChanged" />
+    </interface>
+
+    <children>
+        <!-- Everything scales together on focus (art + below-card text). -->
+        <Group id="scaleHost">
+            <!-- 4px gold focus frame (peeks around the sharp art). -->
+            <Rectangle id="ring" width="308" height="177" translation="[-4,-4]" color="0xC9A84CFF" visible="false" />
+
+            <Rectangle id="artBg" width="300" height="169" color="0x1A2535FF" />
+            <Poster id="image" width="300" height="169" loadDisplayMode="scaleToZoom" />
+
+            <!-- Soft bottom gradient for wordmark/overlay legibility. -->
+            <Poster id="gradient" width="300" height="110" translation="[0,59]" uri="pkg:/images/card_gradient.png" visible="false" />
+
+            <Poster id="wordmark" width="228" height="60" translation="[36,96]" loadDisplayMode="scaleToFit" visible="false" />
+            <Label id="overlay" width="280" height="60" translation="[12,96]" visible="false"
+                   color="0xFFFFFFFF" wrap="true" maxLines="2" lineSpacing="2">
+                <Font role="font" uri="pkg:/fonts/Montserrat-Bold.ttf" size="22" />
+            </Label>
+
+            <!-- CW center play glyph. -->
+            <Poster id="cwPlay" width="56" height="56" translation="[122,56]" uri="pkg:/images/icons/ic_play.png" visible="false" />
+
+            <!-- Badge (top-left). -->
+            <Rectangle id="badgeBg" width="78" height="28" translation="[8,8]" color="0xE50914FF" visible="false">
+                <Label id="badge" width="78" height="28" horizAlign="center" vertAlign="center" color="0xFFFFFFFF">
+                    <Font role="font" uri="pkg:/fonts/Montserrat-Bold.ttf" size="15" />
+                </Label>
+            </Rectangle>
+
+            <!-- RED progress bar (§6.5). -->
+            <Rectangle id="progressTrack" width="300" height="5" translation="[0,164]" color="0x00000066" visible="false">
+                <Rectangle id="progressFill" width="0" height="5" color="0xE50914FF" />
+            </Rectangle>
+
+            <!-- Below-card title + meta (positions set per item in BRS). -->
+            <Label id="belowTitle" width="300" translation="[0,180]" color="0xFFFFFFFF" maxLines="1" visible="false">
+                <Font role="font" uri="pkg:/fonts/Montserrat-SemiBold.ttf" size="21" />
+            </Label>
+            <Label id="belowMeta" width="300" translation="[0,210]" color="0xF0EBE3FF" maxLines="1" visible="false">
+                <Font role="font" uri="pkg:/fonts/Montserrat-Regular.ttf" size="19" />
+            </Label>
+        </Group>
+
+        <Animation id="scaleAnim" duration="0.16" easeFunction="outQuad">
+            <Vector2DFieldInterpolator id="scaleInterp" key="[0,1]" fieldToInterp="scaleHost.scale" />
+        </Animation>
+    </children>
+
+    <script type="text/brightscript" uri="pkg:/components/home/RailCard.brs" />
+    <script type="text/brightscript" uri="pkg:/components/lib/Models.brs" />
+</component>

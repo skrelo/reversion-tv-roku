@@ -15,11 +15,20 @@ sub Main(args as dynamic)
         scene.launchArgs = args
     end if
 
+    ' The exit-confirmation overlay (§6.7) sets this when the user picks Exit;
+    ' closing the screen ends the channel (Roku has no direct quit API).
+    scene.observeField("exitApp", port)
+
     while true
         msg = wait(0, port)
         msgType = type(msg)
         if msgType = "roSGScreenEvent" then
             if msg.isScreenClosed() then return
+        else if msgType = "roSGNodeEvent" then
+            if msg.getField() = "exitApp" and msg.getData() = true then
+                screen.close()
+                return
+            end if
         end if
     end while
 end sub

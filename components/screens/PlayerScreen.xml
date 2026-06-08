@@ -169,6 +169,7 @@
         <Timer id="saveTimer" duration="10" repeat="true" />
         <Timer id="chapterFlashTimer" duration="2" repeat="false" />
         <Timer id="popupTimer" duration="6" repeat="false" />
+        <Timer id="qrTimer" duration="0.05" repeat="false" />
     </children>
 
     <script type="text/brightscript" uri="pkg:/components/screens/PlayerScreen.brs" />

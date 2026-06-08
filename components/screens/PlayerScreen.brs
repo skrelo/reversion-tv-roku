@@ -78,6 +78,8 @@ sub init()
     m.chapterFlashTimer.observeField("fire", "onChapterFlashTimer")
     m.popupTimer = m.top.findNode("popupTimer")
     m.popupTimer.observeField("fire", "onPopupTimer")
+    m.qrTimer = m.top.findNode("qrTimer")
+    m.qrTimer.observeField("fire", "onQrTimer")
 
     ' Video state.
     m.video.notificationInterval = 1
@@ -124,6 +126,7 @@ sub init()
     m.readerMax = 0
     m.wasPlaying = false
     m.prevPos = 0           ' playhead at previous tick (popup crossing detect)
+    m.pendingQr = invalid   ' deferred detail-card QR build
     m.DETAIL_CLAMP = 280
 
     m.iconKeys = []
@@ -320,6 +323,13 @@ sub onVideoState()
     st = m.video.state
     if st = "playing" then
         m.loading.visible = false
+        ' A chip seek auto-resumes a paused video on Roku; if a pausing overlay
+        ' (detail/image/text) is open, re-pause immediately so it never plays
+        ' behind the card. §9.8
+        if overlayPausing() then
+            m.video.control = "pause"
+            return
+        end if
         m.isPlaying = true
         ' Resume seek on the first playable transition (§9.2).
         if not m.resumed then
@@ -690,6 +700,9 @@ function buildMarkers(annotations as object, notes as object) as object
                 if nz(u) <> "" then imgs.push(u)
             end for
         end if
+        for each src in allImages(nz(a.body))
+            imgs.push(src)
+        end for
         out.push({
             key: "a" + toStr(a.id), type: "annotation",
             id: toStr(a.id), startsAt: Int(numOr(a.starts_at_seconds, 0)),
@@ -702,7 +715,7 @@ function buildMarkers(annotations as object, notes as object) as object
             key: "n" + toStr(n.id), type: "note",
             id: toStr(n.id), startsAt: Int(numOr(n.seconds, 0)),
             title: nz(n.title), body: nz(n.body), bodyText: stripHtmlLine(nz(n.body)),
-            images: [], isPrivate: true
+            images: allImages(nz(n.body)), isPrivate: true
         })
     end for
     ' Insertion sort by startsAt (lists are short).
@@ -865,15 +878,11 @@ function handleMarkerKeys(key as string) as boolean
     if key = "up" then m.zone = "icons" : styleMarkers() : styleZones() : return true
     if key = "down" then m.zone = "scrub" : styleMarkers() : styleZones() : return true
     if key = "OK" then
+        ' Open the detail card WITHOUT seeking. Jumping to the timecode is an
+        ' explicit action on the card's focusable timecode button (§9.8) — an
+        ' auto-seek here feels like the video "snaps back" a second.
         mk = m.markers[m.markerIdx]
-        if mk <> invalid then
-            t = mk.startsAt
-            if m.duration > 0 and t > m.duration then t = Int(m.duration)
-            m.video.seek = t
-            m.position = t
-            renderScrub()
-            openDetail(mk)
-        end if
+        if mk <> invalid then openDetail(mk)
         return true
     end if
     return true
@@ -885,14 +894,26 @@ end function
 sub openDetail(mk as object)
     if mk = invalid then return
     m.activeMarker = mk
+    ' Capture the real play-state BEFORE the seek (a chip seek auto-resumes a
+    ' paused video on Roku). The detail card always pauses while open (§9.8);
+    ' on close we restore this state.
     m.wasPlaying = m.isPlaying
-    if m.isPlaying then m.video.control = "pause"
-    buildDetail(mk)
     m.overlay = "detail"
+    m.video.control = "pause"
+    buildDetail(mk)
     m.detailModal.visible = true
     updatePauseOverlay()
     clearHide()
+    ' Build the QR one tick later: the QRCode encodes synchronously on the
+    ' render thread, so doing it inline would block the card from drawing for
+    ' ~1s. Showing the card first then filling the QR feels instant.
+    if m.pendingQr <> invalid then m.qrTimer.control = "start"
 end sub
+
+' Overlays that force the video to stay paused while open.
+function overlayPausing() as boolean
+    return (m.overlay = "detail" or m.overlay = "image" or m.overlay = "text")
+end function
 
 sub buildDetail(mk as object)
     m.detailPanel.removeChildren(m.detailPanel.getChildren(-1, 0))
@@ -914,13 +935,15 @@ sub buildDetail(mk as object)
     m.detailPanel.appendChild(bar)
 
     pad = 56
-    ' Header: timecode + PRIVATE badge.
-    tc = makeLabel(fmt(mk.startsAt), "Bold", 30, accent, 300, 1)
-    tc.translation = [pad, 44]
-    m.detailPanel.appendChild(tc)
+    ' Header: focusable timecode "Go to HH:MM" button + PRIVATE badge.
+    timeBtn = makeActionPillIcon("Go to " + fmt(mk.startsAt), "ic_play.png", pad, 38, 264)
+    timeBtn.accent = accent
+    m.detailPanel.appendChild(timeBtn.group)
+    m.detailBtns["time"] = timeBtn
+    m.detailFocusList.push("time")
     if isNote then
         pv = makeLabel("PRIVATE", "SemiBold", 18, "0x9FB0C0FF", 160, 1)
-        pv.translation = [pad + 150, 50]
+        pv.translation = [pad + 280, 52]
         m.detailPanel.appendChild(pv)
     end if
 
@@ -945,31 +968,56 @@ sub buildDetail(mk as object)
     dv.translation = [pad, 220]
     m.detailPanel.appendChild(dv)
 
+    ' Single left-aligned column: image(s) → body → read-more → QR.
     contentY = 256
+    bodyW = panelW - pad * 2
     images = mk.images
     if images = invalid then images = []
-
-    ' QR on the right when the body carries a link.
+    full = htmlMultiline(mk.body)
+    truncated = (Len(full) > m.DETAIL_CLAMP)
     link = firstLink(mk.body)
-    bodyW = panelW - pad * 2
-    if link <> "" then
-        qrSize = 300
-        qx = panelW - pad - qrSize
-        card = CreateObject("roSGNode", "Rectangle")
-        card.width = qrSize : card.height = qrSize : card.color = "0xFFFFFFFF"
-        card.translation = [qx, contentY]
-        m.detailPanel.appendChild(card)
-        q = makeQrNode(link, qrSize - 24)
-        q.translation = [qx + 12, contentY + 12]
-        m.detailPanel.appendChild(q)
-        cap = makeLabel("Scan to open", "SemiBold", 22, "0x9FB0C0FF", qrSize, 1)
-        cap.horizAlign = "center" : cap.translation = [qx, contentY + qrSize + 10]
-        m.detailPanel.appendChild(cap)
-        bodyW = qx - pad - 40
+
+    ' Presentation decided by COUNT (§9.8): exactly 1 image → large + centered;
+    ' 2+ → thumbnail strip. Both are focusable → open the viewer on OK.
+    heroImage = (images.Count() = 1)
+
+    ' "Press OK to enlarge" hint ABOVE the image(s) (both single + strip).
+    if images.Count() > 0 then
+        hint = makeLabel("Press OK to enlarge", "Regular", 20, "0x8C9EB0FF", panelW - pad * 2, 1)
+        if heroImage then
+            hint.horizAlign = "center"
+        else
+            hint.horizAlign = "left"
+        end if
+        hint.translation = [pad, contentY]
+        m.detailPanel.appendChild(hint)
+        contentY = contentY + 32
     end if
 
-    ' Thumbnail strip (annotations).
-    if images.Count() > 0 then
+    if heroImage then
+        ' Bounded so the card still fits: bigger when the image is the only
+        ' content, smaller when body/link share the card.
+        if full = "" and link = "" then
+            heroW = 880 : heroH = 495
+        else
+            heroW = 560 : heroH = 315
+        end if
+        hx = Int((panelW - heroW) / 2)
+        grp = CreateObject("roSGNode", "Group")
+        grp.translation = [hx, contentY]
+        brd = CreateObject("roSGNode", "Rectangle")
+        brd.width = heroW : brd.height = heroH : brd.color = "0x00000000"
+        grp.appendChild(brd)
+        img = CreateObject("roSGNode", "Poster")
+        img.width = heroW - 8 : img.height = heroH - 8 : img.translation = [4, 4]
+        img.loadDisplayMode = "scaleToFit" : img.uri = images[0]
+        grp.appendChild(img)
+        m.detailPanel.appendChild(grp)
+        m.detailBtns["thumb0"] = { group: grp, bg: brd, isThumb: true }
+        m.detailFocusList.push("thumb0")
+        contentY = contentY + heroH + 24
+    else if images.Count() > 0 then
+        ' Thumbnail strip.
         thumbW = 220 : thumbH = 132 : gap = 20
         n = images.Count()
         if n > 5 then n = 5
@@ -991,9 +1039,7 @@ sub buildDetail(mk as object)
         contentY = contentY + thumbH + 28
     end if
 
-    ' Body (clamped). Mark truncated when the raw text is long.
-    full = htmlMultiline(mk.body)
-    truncated = (Len(full) > m.DETAIL_CLAMP)
+    ' Body (clamped).
     shown = full
     if truncated then shown = Left(full, m.DETAIL_CLAMP) + "…"
     if shown <> "" then
@@ -1001,22 +1047,54 @@ sub buildDetail(mk as object)
         bd.lineSpacing = 8
         bd.translation = [pad, contentY]
         m.detailPanel.appendChild(bd)
-        contentY = contentY + 230
+        contentY = contentY + 220
     end if
 
-    ' Add focusables in nav order: thumbs (already added), readmore, delete, close.
+    ' Read-more (focusable) before the QR.
     if truncated then
         m.detailBtns["readmore"] = makeActionPill("Press OK to read", pad, contentY, 320)
         m.detailPanel.appendChild(m.detailBtns["readmore"].group)
         m.detailFocusList.push("readmore")
         m.readerFull = full
         m.readerTitleText = nz2(mk.title, defaultTitle(mk))
+        contentY = contentY + 84
     end if
+
+    ' Link QR, left-aligned with the URL beneath it. Built deferred (see
+    ' openDetail) so the QR encode doesn't block the card from showing.
+    m.pendingQr = invalid
+    if link <> "" then
+        qrSize = 300
+        maxY = panelH - pad - qrSize - 64
+        qy = contentY
+        if qy > maxY then qy = maxY
+        cardN = CreateObject("roSGNode", "Rectangle")
+        cardN.width = qrSize : cardN.height = qrSize : cardN.color = "0xFFFFFFFF"
+        cardN.translation = [pad, qy]
+        m.detailPanel.appendChild(cardN)
+        ' Show the actual URL under the QR so viewers know what they're scanning.
+        urlLbl = makeLabel(link, "SemiBold", 22, "0x9FB0C0FF", qrSize, 2)
+        urlLbl.translation = [pad, qy + qrSize + 12]
+        m.detailPanel.appendChild(urlLbl)
+        m.pendingQr = { link: link, x: pad + 12, y: qy + 12, size: qrSize - 24 }
+    end if
+
     if isNote then m.detailFocusList.push("delete")
     m.detailFocusList.push("close")
 
-    m.detailFocusKey = "close"
+    ' Land focus on the timecode so a single OK jumps to the marker.
+    m.detailFocusKey = "time"
     styleDetail()
+end sub
+
+sub onQrTimer()
+    if m.pendingQr = invalid then return
+    if m.overlay <> "detail" then m.pendingQr = invalid : return
+    p = m.pendingQr
+    q = makeQrNode(p.link, p.size)
+    q.translation = [p.x, p.y]
+    m.detailPanel.appendChild(q)
+    m.pendingQr = invalid
 end sub
 
 function makeActionPill(label as string, x as integer, y as integer, w as integer) as object
@@ -1030,6 +1108,20 @@ function makeActionPill(label as string, x as integer, y as integer, w as intege
     return { group: grp, bg: bg, label: lbl }
 end function
 
+' Action pill with a leading raster glyph (e.g. the play icon on "Go to …").
+function makeActionPillIcon(label as string, icon as string, x as integer, y as integer, w as integer) as object
+    grp = CreateObject("roSGNode", "Group")
+    grp.translation = [x, y]
+    bg = roundedBg(w, 56, "0x1B2A3AFF")
+    grp.appendChild(bg)
+    g = glyph(icon, 24, [24, 16], "0xFFFFFFFF")
+    grp.appendChild(g)
+    lbl = makeLabel(label, "SemiBold", 24, "0xFFFFFFFF", w - 64, 1)
+    lbl.translation = [60, 0] : lbl.height = 56 : lbl.vertAlign = "center"
+    grp.appendChild(lbl)
+    return { group: grp, bg: bg, label: lbl, glyph: g }
+end function
+
 sub styleDetail()
     for each key in m.detailBtns
         b = m.detailBtns[key]
@@ -1039,10 +1131,14 @@ sub styleDetail()
             b.bg.color = "0x00000000"
             if focused then b.bg.color = "0xC9A84CFF"
         else
+            rest = "0xFFFFFFFF"
+            if b.accent <> invalid then rest = b.accent
             if focused then
-                b.bg.blendColor = "0xFFFFFFFF" : b.label.color = "0x0A1018FF"
+                b.bg.blendColor = "0xC9A84CFF" : b.label.color = "0x0A1018FF"
+                if b.glyph <> invalid then b.glyph.blendColor = "0x0A1018FF"
             else
-                b.bg.blendColor = "0x1B2A3AFF" : b.label.color = "0xFFFFFFFF"
+                b.bg.blendColor = "0x1B2A3AFF" : b.label.color = rest
+                if b.glyph <> invalid then b.glyph.blendColor = rest
             end if
         end if
     end for
@@ -1071,7 +1167,9 @@ function handleDetailKeys(key as string) as boolean
     end if
     if key = "OK" then
         k = m.detailFocusKey
-        if k = "close" then
+        if k = "time" then
+            seekToMarker()
+        else if k = "close" then
             closeDetail()
         else if k = "delete" then
             deleteActiveNote()
@@ -1086,11 +1184,30 @@ function handleDetailKeys(key as string) as boolean
     return true
 end function
 
+' Jump the playhead to the marker's timecode, then close the card. Closing
+' restores the captured play state (so a playing video resumes from there).
+sub seekToMarker()
+    if m.activeMarker = invalid then return
+    t = m.activeMarker.startsAt
+    if m.duration > 0 and t > m.duration then t = Int(m.duration)
+    m.overlay = "none"   ' allow the seek to take effect (not squashed)
+    m.video.seek = t
+    m.position = t
+    m.prevPos = t        ' don't re-fire the popup we just jumped to
+    renderScrub()
+    closeDetail()
+end sub
+
 sub closeDetail()
     m.detailModal.visible = false
     m.activeMarker = invalid
     m.overlay = "none"
-    if m.wasPlaying then m.video.control = "resume"
+    ' Restore: was-playing → resume; was-paused → stay paused.
+    if m.wasPlaying then
+        m.video.control = "resume"
+    else
+        m.video.control = "pause"
+    end if
     showControls("")
     if m.markers.Count() > 0 then enterMarkers()
 end sub
@@ -1217,19 +1334,28 @@ sub showPopup(mk as object)
     accent = "0xC9A84CFF"
     if isNote then accent = "0x4C8CC9FF"
 
+    ' Content column. An embedded image → thumbnail on the right; a webpage
+    ' link → the URL as text under the body. (No QR here — that's the detail
+    ' card.)
+    panelW = 620 : pad = 24
+    imgs = mk.images
+    if imgs = invalid then imgs = []
+    hasImage = (imgs.Count() > 0)
     link = firstLink(mk.body)
-    hasThumb = (mk.images <> invalid and mk.images.Count() > 0)
-    mediaW = 0
-    if link <> "" then
-        mediaW = 200
-    else if hasThumb then
-        mediaW = 220
-    end if
+    hasLink = (link <> "")
 
-    panelW = 600 : panelH = 200
-    if mediaW = 200 then panelH = 236
-    textW = panelW - 36 - mediaW
-    if mediaW > 0 then textW = textW - 24
+    thumbW = 0
+    if hasImage then thumbW = 200
+    textW = panelW - pad * 2 - thumbW
+    if thumbW > 0 then textW = textW - 20
+
+    title = ellip(nz2(mk.title, defaultTitle(mk)), 48)
+    body = ellip(stripHtmlLine(mk.body), 120)
+    hasBody = (body <> "")
+    panelH = 96
+    if hasBody then panelH = panelH + 64
+    if hasLink then panelH = panelH + 44
+    if hasImage and panelH < 150 then panelH = 150
 
     bg = CreateObject("roSGNode", "Rectangle")
     bg.width = panelW : bg.height = panelH : bg.color = "0x10171FF2"
@@ -1239,44 +1365,38 @@ sub showPopup(mk as object)
     m.popup.appendChild(bar)
 
     dot = CreateObject("roSGNode", "Poster")
-    dot.width = 14 : dot.height = 14 : dot.translation = [24, 28]
+    dot.width = 14 : dot.height = 14 : dot.translation = [pad, 30]
     dot.uri = "pkg:/images/avatar_circle.png" : dot.blendColor = accent
     m.popup.appendChild(dot)
     tc = makeLabel(fmt(mk.startsAt), "Bold", 22, accent, 160, 1)
-    tc.translation = [46, 22]
+    tc.translation = [pad + 22, 24]
     m.popup.appendChild(tc)
     if isNote then
         pv = makeLabel("PRIVATE", "SemiBold", 16, "0x9FB0C0FF", 120, 1)
-        pv.translation = [150, 25]
+        pv.translation = [pad + 128, 27]
         m.popup.appendChild(pv)
     end if
 
-    ttl = makeLabel(nz2(mk.title, defaultTitle(mk)), "Bold", 26, "0xFFFFFFFF", textW, 1)
-    ttl.translation = [24, 58]
+    ttl = makeLabel(title, "Bold", 26, "0xFFFFFFFF", textW, 1)
+    ttl.translation = [pad, 60]
     m.popup.appendChild(ttl)
-    body = stripHtmlLine(mk.body)
-    if body <> "" then
+    y = 100
+    if hasBody then
         bd = makeLabel(body, "Regular", 20, "0x9FB0C0FF", textW, 2)
-        bd.translation = [24, 98]
+        bd.translation = [pad, y]
         m.popup.appendChild(bd)
+        y = y + 64
+    end if
+    if hasLink then
+        ln = makeLabel(ellip(link, 64), "SemiBold", 20, accent, textW, 1)
+        ln.translation = [pad, y]
+        m.popup.appendChild(ln)
     end if
 
-    if link <> "" then
-        qx = panelW - 24 - mediaW
-        card = CreateObject("roSGNode", "Rectangle")
-        card.width = mediaW : card.height = mediaW : card.color = "0xFFFFFFFF"
-        card.translation = [qx, 18]
-        m.popup.appendChild(card)
-        q = makeQrNode(link, mediaW - 16)
-        q.translation = [qx + 8, 26]
-        m.popup.appendChild(q)
-        cap = makeLabel("Scan to open", "SemiBold", 16, "0x9FB0C0FF", mediaW, 1)
-        cap.horizAlign = "center" : cap.translation = [qx, 18 + mediaW + 4]
-        m.popup.appendChild(cap)
-    else if hasThumb then
+    if hasImage then
         th = CreateObject("roSGNode", "Poster")
-        th.width = mediaW : th.height = 124 : th.translation = [panelW - 24 - mediaW, 38]
-        th.loadDisplayMode = "scaleToZoom" : th.uri = mk.images[0]
+        th.width = thumbW : th.height = panelH - 36 : th.translation = [panelW - pad - thumbW, 18]
+        th.loadDisplayMode = "scaleToZoom" : th.uri = imgs[0]
         m.popup.appendChild(th)
     end if
 
@@ -1285,13 +1405,35 @@ sub showPopup(mk as object)
     m.popupTimer.control = "start"
 end sub
 
+' Truncate to n chars with an ellipsis.
+function ellip(s as string, n as integer) as string
+    if s = invalid then return ""
+    if Len(s) <= n then return s
+    return Left(s, n).Trim() + "…"
+end function
+
 sub onPopupTimer()
     m.popup.visible = false
 end sub
 
 ' ── HTML helpers ────────────────────────────────────────────────────────
+' All <img src> URLs in an HTML body (TipTap embeds images as <img>).
+function allImages(html as string) as object
+    out = []
+    if html = invalid or html = "" then return out
+    rx = CreateObject("roRegex", "<img[^>]+src\s*=\s*[" + Chr(34) + "']([^" + Chr(34) + "']+)[" + Chr(34) + "']", "i")
+    matches = rx.MatchAll(html)
+    for each mm in matches
+        if mm.Count() >= 2 and nz(mm[1]) <> "" then out.push(mm[1])
+    end for
+    return out
+end function
+
+' First webpage link in an HTML body. <img> tags are stripped first so an
+' image src never leaks into the bare-URL fallback and gets QR'd.
 function firstLink(html as string) as string
     if html = invalid or html = "" then return ""
+    html = CreateObject("roRegex", "<img[^>]*>", "i").ReplaceAll(html, "")
     rx = CreateObject("roRegex", "href\s*=\s*[" + Chr(34) + "']([^" + Chr(34) + "']+)[" + Chr(34) + "']", "i")
     mm = rx.Match(html)
     if mm.Count() >= 2 then

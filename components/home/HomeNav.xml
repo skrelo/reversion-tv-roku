@@ -17,7 +17,7 @@
         <Poster id="gradient" uri="pkg:/images/nav_gradient.png" width="600" height="1080" visible="false" />
 
         <!-- Focus pill: translucent white, matches Tizen .nav-item.focused. -->
-        <Rectangle id="hl" width="330" height="64" translation="[20,200]" color="0xFFFFFF33" visible="false" />
+        <Rectangle id="hl" width="410" height="64" translation="[20,200]" color="0xFFFFFF33" visible="false" />
 
         <!-- Profile (expanded only). -->
         <Group id="profile" translation="[36,72]" visible="false">

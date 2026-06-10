@@ -9,7 +9,9 @@
 sub init()
     ' Timing constants (§9.1).
     m.SEEK_STEP = 10
-    m.WATCHED = 0.95
+    ' Completion / resume use a fixed 15s-from-end rule (NOT a percentage), so a
+    ' video with minutes left is never treated as finished (§9.13).
+    m.END_LEAD = 15
     m.SEEK_TIERS = [600, 1000, 1400, 1800]   ' ms held → rate 2..5
 
     m.video = m.top.findNode("video")
@@ -53,6 +55,10 @@ sub init()
     m.markersScrollInterp = m.top.findNode("markersScrollInterp")
 
     m.popup = m.top.findNode("popup")
+    m.qrNote = m.top.findNode("qrNote")
+    m.qrPanel = m.top.findNode("qrPanel")
+    m.saveBanner = m.top.findNode("saveBanner")
+    m.saveBannerText = m.top.findNode("saveBannerText")
     m.detailModal = m.top.findNode("detailModal")
     m.detailPanel = m.top.findNode("detailPanel")
     m.imageViewer = m.top.findNode("imageViewer")
@@ -80,6 +86,23 @@ sub init()
     m.popupTimer.observeField("fire", "onPopupTimer")
     m.qrTimer = m.top.findNode("qrTimer")
     m.qrTimer.observeField("fire", "onQrTimer")
+    m.qrPollTimer = m.top.findNode("qrPollTimer")
+    m.qrPollTimer.observeField("fire", "onQrPollTimer")
+    m.bannerTimer = m.top.findNode("bannerTimer")
+    m.bannerTimer.observeField("fire", "onBannerTimer")
+    m.loadWatchdog = m.top.findNode("loadWatchdog")
+    m.loadWatchdog.observeField("fire", "onLoadWatchdog")
+    m.settingsModal = m.top.findNode("settingsModal")
+    m.settingsPanel = m.top.findNode("settingsPanel")
+    m.upNextCard = m.top.findNode("upNextCard")
+    m.upNextRecs = m.top.findNode("upNextRecs")
+    m.recsPanel  = m.top.findNode("recsPanel")
+    m.upNextTimer = m.top.findNode("upNextTimer")
+    m.upNextTimer.observeField("fire", "onUpNextTick")
+    m.loadCover = m.top.findNode("loadCover")
+    m.markerRepeatTimer = m.top.findNode("markerRepeatTimer")
+    m.markerRepeatTimer.observeField("fire", "onMarkerRepeat")
+    m.markerHoldDir = 0
 
     ' Video state.
     m.video.notificationInterval = 1
@@ -93,6 +116,8 @@ sub init()
     m.duration = 0
     m.position = 0
     m.resumed = false
+    m.ready = false            ' true once playback has reached the resume point
+    m.pendingResume = -1       ' resume target while the black cover is still up
     m.isPlaying = false
     m.completeSaved = false
     m.lastSavedSecond = -1
@@ -102,7 +127,26 @@ sub init()
     m.iconIdx = 0
     m.pillIdx = 1
     m.captionsOn = false
-    m.overlay = "none"      ' none | chapters (settings/qr/detail land in later passes)
+    m.overlay = "none"      ' none | chapters | settings | detail | image | text | qr
+
+    ' §9.11 In-player pop-up prefs — read from registry, default on.
+    cfg = ReversionConfig()
+    m.annotPopups = (RegRead(cfg.KEY_ANNOTATION_POPUPS) <> "false")
+    m.notePopups  = (RegRead(cfg.KEY_NOTE_POPUPS)       <> "false")
+    m.settingsSel = 0   ' 0 = annotation row, 1 = note row
+
+    ' §9.12 Up Next / autoplay — read autoplay pref, default on.
+    m.autoplayNext = (RegRead(cfg.KEY_AUTOPLAY_NEXT) <> "false")
+    m.upNextFired = false      ' fires only once per video
+    m.upNextMs = 0             ' countdown ms remaining (Mode A)
+    m.upNextSel = 0            ' focused button index in Mode A card
+    m.upNextPlayBtn = invalid  ' set by buildUpNextCard()
+    m.upNextDismissBtn = invalid
+    m.upNextCountLbl = invalid
+    m.recsSel = 0              ' focused card index in Mode B grid
+    m.recsData = []            ' fetched recommendation events
+    m.recsCardBtns = []
+    m.UP_NEXT_LEAD = 15        ' seconds before end to trigger §9.12
 
     m.chapters = []
     m.chapSel = 0
@@ -111,15 +155,16 @@ sub init()
 
     m.markers = []          ' merged annotations + notes, sorted by time
     m.markerIdx = 0
-    m.markerInit = false    ' seed-to-playhead only once per video
     m.markerChips = []      ' [{ group, border, bg, x, w }]
     m.markerStripW = 0
     m.MARKER_W = 1620       ' visible strip width (matches scrub)
 
     ' Detail / image / text overlay state.
     m.activeMarker = invalid
-    m.detailFocusKey = "close"
-    m.detailFocusList = []
+    m.detailFocusKey = "time"
+    m.detailRows = []       ' focus grid: [ [topRow keys], [image keys], [readmore] ]
+    m.detailRow = 0
+    m.detailCol = 0
     m.detailBtns = {}       ' focusKey -> { bg, glyph?, label? }
     m.viewerIndex = 0
     m.readerScrollY = 0
@@ -129,11 +174,27 @@ sub init()
     m.pendingQr = invalid   ' deferred detail-card QR build
     m.DETAIL_CLAMP = 280
 
+    ' Add-Note / Edit QR companion (§9.7).
+    m.qrCode = ""           ' current one-time code
+    m.qrEditNoteId = ""     ' non-empty when editing a note
+    m.qrExpired = false
+    m.qrFocus = 0           ' 0 = Continue/Get-new, 1 = Cancel/Close
+    m.qrSaved = false
+    m.qrPollMs = 3000
+    m.qrTimecode = 0
+
     m.iconKeys = []
     m.pillKeys = []
     m.iconBtns = []         ' [{ key, bg, glyph, tip }]
     m.pillBtns = []         ' [{ bg, glyph, label }]
     m.seekHold = invalid
+    m.scrubbing = false             ' true while a hold-seek preview is in progress
+    m.scrubTarget = 0
+    m.wasPlayingBeforeSeek = false  ' restored in commitSeek()
+    m.scrubPaused = false           ' did the active hold actually pause the video?
+    m.seekTicked = false            ' false = quick tap; true = held (timer ticked)
+    m.seekTimer = m.top.findNode("seekTimer")
+    m.seekTimer.observeField("fire", "onSeekTick")
     m.clock = CreateObject("roTimespan")   ' monotonic ms for hold-to-seek
 
     m.top.setFocus(true)
@@ -182,7 +243,7 @@ sub onStreamResponse()
     seed = 0
     durSec = numOr(data.duration_seconds, 0)
     progSec = numOr(data.progress_seconds, 0)
-    if progSec > 0 and durSec > 0 and progSec < durSec * m.WATCHED then seed = progSec
+    if progSec > 0 and durSec > 0 and progSec < durSec - m.END_LEAD then seed = progSec
     m.position = seed
     if durSec > 0 then m.duration = durSec
 
@@ -205,12 +266,28 @@ sub onStreamResponse()
     if cap <> "" then content.SubtitleUrl = cap
     m.video.content = content
     m.video.control = "play"
+    ' Watchdog: if it never reaches "playing" (e.g. blocked origin → endless
+    ' buffering), convert the spinner into an exitable error. §9
+    m.loadWatchdog.control = "stop"
+    m.loadWatchdog.control = "start"
 end sub
 
 sub showError(msg as string)
+    m.loadWatchdog.control = "stop"
     m.loading.visible = false
-    m.errorLabel.text = msg
+    m.errorLabel.text = msg + Chr(10) + Chr(10) + "Press BACK to go back."
     m.errorLabel.visible = true
+    ' Make sure the screen owns focus so BACK routes to us (a stuck Video node
+    ' can otherwise hold the remote during buffering).
+    m.top.setFocus(true)
+end sub
+
+' Initial-load watchdog (§9): playback never started in time. Stop the video so
+' it stops trying (and releases the remote), then show an exitable error.
+sub onLoadWatchdog()
+    if m.isPlaying then return
+    m.video.control = "stop"
+    showError("This video could not be played.")
 end sub
 
 ' ── Titles + pause-overlay brand ────────────────────────────────────────
@@ -321,6 +398,10 @@ end function
 ' ── Video node events ───────────────────────────────────────────────────
 sub onVideoState()
     st = m.video.state
+    ' While scrubbing, the scrub owns play/pause state. Ignore the transient
+    ' pause/resume/buffering events the seek itself generates so they don't
+    ' flip m.isPlaying or pop the pause overlay. commitSeek() settles state.
+    if m.scrubbing then return
     if st = "playing" then
         m.loading.visible = false
         ' A chip seek auto-resumes a paused video on Roku; if a pausing overlay
@@ -331,12 +412,20 @@ sub onVideoState()
             return
         end if
         m.isPlaying = true
+        m.loadWatchdog.control = "stop"   ' playback started → cancel watchdog
         ' Resume seek on the first playable transition (§9.2).
         if not m.resumed then
             m.resumed = true
             progSec = numOr(m.payload.progress_seconds, 0)
-            if progSec > 0 and m.duration > 0 and progSec < m.duration * m.WATCHED then
+            if progSec > 0 and m.duration > 0 and progSec < m.duration - m.END_LEAD then
+                ' Keep the black cover up until onPosition reports we've reached
+                ' the resume point, so the 0:00 frame never flashes.
+                m.pendingResume = Int(progSec)
                 m.video.seek = progSec
+            else
+                ' No resume → reveal immediately.
+                m.ready = true
+                m.loadCover.visible = false
             end if
             ' NOTE: Roku has no public arbitrary VOD playback-rate API, so the
             ' saved default playback speed (§10.1) cannot be applied here. This
@@ -352,10 +441,20 @@ sub onVideoState()
     else if st = "finished" then
         m.isPlaying = false
         markComplete()
-        ' Phase 1: no autoplay/Up-Next yet → leave the player.
-        pop()
+        ' If Up-Next wasn't triggered in the lead window (very short video / skipped),
+        ' decide now; otherwise Up-Next card/recs is already showing.
+        if not m.upNextFired then
+            m.upNextFired = true
+            if m.payload.next_video <> invalid and m.autoplayNext then
+                playNext()
+            else if m.payload.next_video = invalid then
+                openUpNextRecs()
+            else
+                pop()
+            end if
+        end if
     else if st = "error" then
-        showError("Playback error. Please go back and try again.")
+        showError("Playback error.")
     end if
 end sub
 
@@ -367,22 +466,59 @@ sub onDuration()
 end sub
 
 sub onPosition()
+    ' While scrubbing we show the preview target, not the live playback head.
+    if m.scrubbing then return
     m.position = m.video.position
     renderScrub()
+
+    ' Drop the black cover once playback has reached the resume point (§9.2).
+    if not m.ready then
+        if m.pendingResume < 0 or m.position >= m.pendingResume - 1 then
+            m.ready = true
+            m.pendingResume = -1
+            m.loadCover.visible = false
+        else
+            return   ' still seeking to the resume point; nothing else to do yet
+        end if
+    end if
+
     maybePopup(m.position)
 
     ' Progress save at 95% (once), deduped by whole second elsewhere (§9.13).
-    if m.duration > 0 and not m.completeSaved and m.position >= m.duration * m.WATCHED then
+    if m.duration > 0 and not m.completeSaved and m.position >= m.duration - m.END_LEAD then
         m.completeSaved = true
         markComplete()
+    end if
+
+    ' Up-Next lead window (§9.12).
+    maybeUpNext()
+end sub
+
+sub maybeUpNext()
+    if m.upNextFired then return
+    if not m.isPlaying then return
+    if m.overlay <> "none" then return
+    if m.duration <= m.UP_NEXT_LEAD then return
+    remain = m.duration - m.position
+    if remain > m.UP_NEXT_LEAD then return
+
+    m.upNextFired = true
+    if m.payload.next_video <> invalid then
+        if m.autoplayNext then openUpNextCard()
+        ' Autoplay OFF → no interruption (§9.12).
+    else
+        openUpNextRecs()
     end if
 end sub
 
 ' ── Scrub render ────────────────────────────────────────────────────────
 sub renderScrub()
+    renderScrubAt(m.position)
+end sub
+
+sub renderScrubAt(posSec as integer)
     total = m.duration
     if total <= 0 then total = numOr(m.payload.duration_seconds, 0)
-    posSec = m.position
     if posSec < 0 then posSec = 0
     if total > 0 and posSec > total then posSec = total
 
@@ -423,13 +559,22 @@ end sub
 
 ' ── Play / pause ────────────────────────────────────────────────────────
 sub togglePlay()
-    if m.video.state = "playing" then
+    ' Ignore play/pause until the resume point is reached; pausing mid-load
+    ' would stop onPosition from firing and strand the black cover (§9.2).
+    if not m.ready then return
+    ' Decide on m.isPlaying (our tracked intent), NOT m.video.state — right
+    ' after a seek the node sits in "buffering" for a moment, and keying off the
+    ' raw state there made a pause press resume instead.
+    if m.isPlaying then
         m.video.control = "pause"
+        m.isPlaying = false
         doFlash("ic_pause.png")
     else
         m.video.control = "resume"
+        m.isPlaying = true
         doFlash("ic_play.png")
     end if
+    applyPlayState()
 end sub
 
 sub applyPlayState()
@@ -454,7 +599,7 @@ sub applyPlayState()
 end sub
 
 sub updatePauseOverlay()
-    show = (m.controlsVisible and not m.isPlaying and m.overlay = "none")
+    show = (m.controlsVisible and not m.isPlaying and m.overlay = "none" and not m.scrubbing)
     m.pauseScrim.visible = show
     if show and nz(m.payload.wordmark_url) <> "" then
         m.pauseWordmark.visible = true : m.pauseTitle.visible = false
@@ -505,9 +650,21 @@ sub hideControls()
 end sub
 
 sub armHide()
+    armHideIn(5)   ' default linger while navigating the controls
+end sub
+
+' Arm the chrome auto-hide with an explicit delay. A quick seek tap uses a short
+' delay so the scrubber flicks away like other TV players, while active control
+' navigation keeps the default 5s.
+sub armHideIn(secs as float)
     clearHide()
+    ' Never auto-hide mid-scrub or mid-N/A-bar-scan — the chrome must stay up for
+    ' the whole hold, however long it lasts. Re-armed once the key is released
+    ' (commitSeek for scrub; the key-release block for the N/A bar).
+    if m.scrubbing or m.markerHoldDir <> 0 then return
     ' Auto-hide only while playing and no modal (§9.3). Paused chrome stays.
     if m.isPlaying and m.controlsVisible then
+        m.hideTimer.duration = secs
         m.hideTimer.control = "start"
     end if
 end sub
@@ -536,20 +693,20 @@ sub styleIcons()
         b = m.iconBtns[i]
         focused = (m.zone = "icons" and m.iconIdx = i)
         if focused then
-            ' Brighter white wash on focus (Tizen ~18% white).
-            b.bg.blendColor = "0xFFFFFFFF"
-            b.bg.opacity = 0.32
+            b.bg.blendColor = "0xC9A84CFF"   ' gold fill on focus
+            b.bg.opacity = 0.9
             b.tip.opacity = 1
+            b.glyph.blendColor = "0x0A1018FF" ' dark glyph on gold
         else
             ' Constant dark translucent circle so white glyphs read on any frame.
             b.bg.blendColor = "0x0A1018FF"
             b.bg.opacity = 0.5
             b.tip.opacity = 0
-        end if
-        if b.key = "cc" and m.captionsOn then
-            b.glyph.blendColor = "0xC9A84CFF"
-        else
-            b.glyph.blendColor = "0xFFFFFFFF"
+            if b.key = "cc" and m.captionsOn then
+                b.glyph.blendColor = "0xC9A84CFF"
+            else
+                b.glyph.blendColor = "0xFFFFFFFF"
+            end if
         end if
     end for
 end sub
@@ -572,38 +729,121 @@ sub styleScrub(focused as boolean)
         m.scrubTrack.height = 14 : m.scrubPlayed.height = 14
         m.scrubTrack.translation = [0, -4] : m.scrubPlayed.translation = [0, -4]
         m.scrubKnob.visible = true
-        m.scrubPlayed.color = "0xE0C25EFF"
+        m.scrubPlayed.blendColor = "0xE0C25EFF"
     else
         m.scrubTrack.height = 6 : m.scrubPlayed.height = 6
         m.scrubTrack.translation = [0, 0] : m.scrubPlayed.translation = [0, 0]
         m.scrubKnob.visible = false
-        m.scrubPlayed.color = "0xC9A84CFF"
+        m.scrubPlayed.blendColor = "0xC9A84CFF"
     end if
 end sub
 
-' ── Seeking (single-tap 10s + hold-to-seek tiers) §9.4/§9.5 ─────────────
-sub seekBy(delta as integer)
-    if m.duration <= 0 then return
-    target = m.position + delta
-    if target < 0 then target = 0
-    if target > m.duration then target = m.duration
-    m.video.seek = target
-    m.position = target
-    renderScrub()
-end sub
+' ── Seeking (accumulating preview + progressive hold tiers) §9.4/§9.5 ────
+' Hold-to-seek (§9.5, Roku edition).
+'
+' Roku's d-pad fires exactly ONE press=true then ONE press=false per hold —
+' there are no repeated keydown events.  We use a 200 ms Timer to drive the
+' acceleration ramp the same way Tizen does with repeated keydown events.
+'
+' press=true  → start seek timer, record dir + hold-start time, take first step.
+' Timer tick  → advance scrubTarget by tier * SEEK_STEP, re-render.
+' press=false → stop timer, commit the seek to the video once.
 
 sub onSeekKey(dir as integer)
+    if m.duration <= 0 then return
+    ' Ignore seeks until the video has reached its resume position — seeking
+    ' during the initial load would stomp the saved position back to 0 (§9.2).
+    if not m.ready then return
     nowMs = nowMillis()
-    tier = 1
-    if m.seekHold <> invalid and m.seekHold.dir = dir then
-        tier = tierForHold(nowMs - m.seekHold.start)
-    else
+
+    if not m.scrubbing then
+        m.scrubbing = true
+        m.scrubTarget = Int(m.position)
+        m.seekHold = { dir: dir, start: nowMs }
+        m.seekTimer.control = "start"
+        ' Capture state, but DON'T pause yet. A quick tap (press+release before
+        ' the first 200ms tick) must never pause: pausing then resuming on commit
+        ' races a stale "paused" event that flips m.isPlaying after we resume.
+        ' We only pause once the hold is real (first onSeekTick). §9.5
+        m.wasPlayingBeforeSeek = m.isPlaying
+        m.scrubPaused = false
+        m.seekTicked = false
+    else if m.seekHold = invalid or m.seekHold.dir <> dir then
+        ' Direction changed mid-hold — restart the ramp.
         m.seekHold = { dir: dir, start: nowMs }
     end if
-    seekBy(dir * m.SEEK_STEP * tier)
+
+    ' Take the first step immediately so a quick tap still seeks.
+    advanceScrubTarget()
+    showControls("scrub")
+end sub
+
+' Timer tick: advance and re-render while the key stays held. The first tick
+' means it's a real hold (not a tap), so pause the video element now.
+sub onSeekTick()
+    if not m.scrubbing then
+        m.seekTimer.control = "stop"
+        return
+    end if
+    m.seekTicked = true   ' the timer fired → this is a hold, not a quick tap
+    if m.wasPlayingBeforeSeek and not m.scrubPaused then
+        m.video.control = "pause"
+        m.scrubPaused = true
+    end if
+    advanceScrubTarget()
+end sub
+
+sub advanceScrubTarget()
+    if m.seekHold = invalid then return
+    dir = m.seekHold.dir
+    elapsed = nowMillis() - m.seekHold.start
+    tier = tierForHold(elapsed)
+    t = m.scrubTarget + dir * m.SEEK_STEP * tier
+    if t < 0 then t = 0
+    if t > m.duration then t = Int(m.duration)
+    m.scrubTarget = t
+    renderScrubAt(t)
     if tier >= 2 then showSeekIndicator(tier, dir)
-    if m.controlsVisible then
-        showControls("scrub")
+end sub
+
+' Commit the previewed scrub position to the video (called on key release).
+sub commitSeek()
+    if not m.scrubbing then return
+    m.seekTimer.control = "stop"
+    t = m.scrubTarget
+    m.seekHold = invalid
+    m.seekIndicator.visible = false
+    m.indicatorTimer.control = "stop"
+    m.position = t
+    m.prevPos = t
+    wasPlaying = m.wasPlayingBeforeSeek
+    m.wasPlayingBeforeSeek = false
+
+    ' Re-enable onVideoState BEFORE the seek so the resulting playing/paused
+    ' events drive m.isPlaying + the overlay normally.
+    m.scrubbing = false
+    m.video.seek = t            ' Roku auto-resumes playback on a seek.
+
+    if wasPlaying then
+        ' Auto-resume is exactly what we want; onVideoState("playing") will set
+        ' m.isPlaying = true and armHide() so the chrome fades out.
+        m.isPlaying = true
+        applyPlayState()
+        ' A quick tap-seek flicks the chrome away fast (like other players); an
+        ' actual hold keeps the default linger so you can read the final spot.
+        if not m.seekTicked then armHideIn(1)
+    else
+        ' Was paused before the scrub — counter the auto-resume and stay paused.
+        m.video.control = "pause"
+        m.isPlaying = false
+        applyPlayState()
+    end if
+    renderScrub()
+    ' Re-sync the N/A bar to the marker nearest the new playhead (§9.6).
+    if m.markers.Count() > 0 then
+        m.markerIdx = nearestMarkerIndex(m.markers, m.position)
+        styleMarkers()
+        centerMarker(m.markerIdx, true)
     end if
 end sub
 
@@ -639,8 +879,11 @@ sub activateIcon()
         armHide()
     else if k = "chapters" then
         openChapters()
+    else if k = "addnote" then
+        openQrNote("")
+    else if k = "settings" then
+        openSettings()
     end if
-    ' addnote / settings wired in a later pass.
 end sub
 
 sub activatePill()
@@ -649,13 +892,16 @@ sub activatePill()
         m.video.seek = 0
         m.position = 0
         m.completeSaved = false
+        m.upNextFired = false   ' Allow Up-Next to fire again after restart (§9.12).
         if m.video.state <> "playing" then m.video.control = "resume"
         showControls("pills")
     else if k = "playpause" then
         togglePlay()
         armHide()
     else if k = "next" then
-        ' Phase 1: no in-place swap yet → leave for the later autoplay pass.
+        ' Next pill in transport bar → immediate advance (§9.12).
+        m.upNextFired = true
+        playNext()
         armHide()
     end if
 end sub
@@ -853,11 +1099,10 @@ end sub
 
 sub enterMarkers()
     if m.markers.Count() = 0 then return
-    if not m.markerInit then
-        idx = nearestMarkerIndex(m.markers, m.position)
-        if idx >= 0 then m.markerIdx = idx
-        m.markerInit = true
-    end if
+    ' Entering the N/A bar always correlates the focused chip to the current
+    ' playhead, so the highlighted marker matches the scrub timecode.
+    idx = nearestMarkerIndex(m.markers, m.position)
+    if idx >= 0 then m.markerIdx = idx
     m.zone = "markers"
     styleMarkers()
     centerMarker(m.markerIdx)
@@ -868,11 +1113,17 @@ end sub
 
 function handleMarkerKeys(key as string) as boolean
     if key = "left" then
-        if m.markerIdx > 0 then m.markerIdx = m.markerIdx - 1 : styleMarkers() : centerMarker(m.markerIdx)
+        m.markerHoldDir = -1
+        clearHide()   ' onKeyEvent armed auto-hide before markerHoldDir was set
+        stepMarker(-1)
+        m.markerRepeatTimer.control = "start"   ' hold to keep scanning §9.6
         return true
     end if
     if key = "right" then
-        if m.markerIdx < m.markers.Count() - 1 then m.markerIdx = m.markerIdx + 1 : styleMarkers() : centerMarker(m.markerIdx)
+        m.markerHoldDir = 1
+        clearHide()
+        stepMarker(1)
+        m.markerRepeatTimer.control = "start"
         return true
     end if
     if key = "up" then m.zone = "icons" : styleMarkers() : styleZones() : return true
@@ -887,6 +1138,29 @@ function handleMarkerKeys(key as string) as boolean
     end if
     return true
 end function
+
+' Move the N/A bar selection by dir (±1), clamped. Stops the hold-repeat timer
+' at the ends so it doesn't keep firing against a boundary.
+sub stepMarker(dir as integer)
+    nextIdx = m.markerIdx + dir
+    if nextIdx < 0 or nextIdx > m.markers.Count() - 1 then
+        m.markerRepeatTimer.control = "stop"
+        return
+    end if
+    m.markerIdx = nextIdx
+    styleMarkers()
+    centerMarker(m.markerIdx)
+end sub
+
+' Hold-to-scan tick: keep stepping while the key stays held (§9.6). The repeat
+' timer is stopped on key release (onKeyEvent) and when the zone changes.
+sub onMarkerRepeat()
+    if m.zone <> "markers" or m.markerHoldDir = 0 or m.overlay <> "none" or not m.controlsVisible then
+        m.markerRepeatTimer.control = "stop"
+        return
+    end if
+    stepMarker(m.markerHoldDir)
+end sub
 
 ' ════════════════════════════════════════════════════════════════════════
 '  Marker detail card (§9.8) — centered modal, pauses video.
@@ -912,13 +1186,13 @@ end sub
 
 ' Overlays that force the video to stay paused while open.
 function overlayPausing() as boolean
-    return (m.overlay = "detail" or m.overlay = "image" or m.overlay = "text")
+    return (m.overlay = "detail" or m.overlay = "image" or m.overlay = "text" or m.overlay = "qr")
 end function
 
 sub buildDetail(mk as object)
     m.detailPanel.removeChildren(m.detailPanel.getChildren(-1, 0))
     m.detailBtns = {}
-    m.detailFocusList = []
+    imgKeys = []   ' image-row focus keys (collected while building images)
 
     panelW = 1180 : panelH = 820
     px = Int((1920 - panelW) / 2) : py = Int((1080 - panelH) / 2)
@@ -935,41 +1209,46 @@ sub buildDetail(mk as object)
     m.detailPanel.appendChild(bar)
 
     pad = 56
+    ' Non-focusable "Press BACK to close" hint, centered at the very top. There
+    ' is no Close button — BACK dismisses the card (§9.8/§9.15 inside-out).
+    backHint = makeLabel("Press BACK to close", "SemiBold", 20, "0x8C9EB0FF", panelW, 1)
+    backHint.horizAlign = "center"
+    backHint.translation = [0, 18]
+    m.detailPanel.appendChild(backHint)
+
     ' Header: focusable timecode "Go to HH:MM" button + PRIVATE badge.
-    timeBtn = makeActionPillIcon("Go to " + fmt(mk.startsAt), "ic_play.png", pad, 38, 264)
+    timeBtn = makeActionPillIcon("Go to " + fmt(mk.startsAt), "ic_play.png", pad, 56, 264)
     timeBtn.accent = accent
     m.detailPanel.appendChild(timeBtn.group)
     m.detailBtns["time"] = timeBtn
-    m.detailFocusList.push("time")
     if isNote then
         pv = makeLabel("PRIVATE", "SemiBold", 18, "0x9FB0C0FF", 160, 1)
-        pv.translation = [pad + 280, 52]
+        pv.translation = [pad + 280, 70]
         m.detailPanel.appendChild(pv)
     end if
 
-    ' Action pills (top-right): Delete (notes), Close. Edit arrives with the
-    ' QR companion in a later pass.
+    ' Action pills (top-right): Edit + Delete for notes; annotations have none.
     rightX = panelW - pad
-    closeBtn = makeActionPill("Close", rightX - 150, 40, 150)
-    m.detailPanel.appendChild(closeBtn.group)
-    m.detailBtns["close"] = closeBtn
     if isNote then
-        delBtn = makeActionPill("Delete", rightX - 150 - 16 - 150, 40, 150)
+        delBtn = makeActionPill("Delete", rightX - 150, 56, 150)
         m.detailPanel.appendChild(delBtn.group)
         m.detailBtns["delete"] = delBtn
+        editBtn = makeActionPill("Edit", rightX - 150 - 16 - 130, 56, 130)
+        m.detailPanel.appendChild(editBtn.group)
+        m.detailBtns["edit"] = editBtn
     end if
 
     ' Title.
     ttl = makeLabel(nz2(mk.title, defaultTitle(mk)), "Bold", 40, "0xFFFFFFFF", panelW - pad * 2, 2)
-    ttl.translation = [pad, 108]
+    ttl.translation = [pad, 132]
     m.detailPanel.appendChild(ttl)
     dv = CreateObject("roSGNode", "Rectangle")
     dv.width = panelW - pad * 2 : dv.height = 2 : dv.color = "0x2A3848FF"
-    dv.translation = [pad, 220]
+    dv.translation = [pad, 244]
     m.detailPanel.appendChild(dv)
 
     ' Single left-aligned column: image(s) → body → read-more → QR.
-    contentY = 256
+    contentY = 280
     bodyW = panelW - pad * 2
     images = mk.images
     if images = invalid then images = []
@@ -1014,7 +1293,7 @@ sub buildDetail(mk as object)
         grp.appendChild(img)
         m.detailPanel.appendChild(grp)
         m.detailBtns["thumb0"] = { group: grp, bg: brd, isThumb: true }
-        m.detailFocusList.push("thumb0")
+        imgKeys.push("thumb0")
         contentY = contentY + heroH + 24
     else if images.Count() > 0 then
         ' Thumbnail strip.
@@ -1034,7 +1313,7 @@ sub buildDetail(mk as object)
             m.detailPanel.appendChild(grp)
             key = "thumb" + Stri(i).Trim()
             m.detailBtns[key] = { group: grp, bg: brd, isThumb: true }
-            m.detailFocusList.push(key)
+            imgKeys.push(key)
         end for
         contentY = contentY + thumbH + 28
     end if
@@ -1054,7 +1333,6 @@ sub buildDetail(mk as object)
     if truncated then
         m.detailBtns["readmore"] = makeActionPill("Press OK to read", pad, contentY, 320)
         m.detailPanel.appendChild(m.detailBtns["readmore"].group)
-        m.detailFocusList.push("readmore")
         m.readerFull = full
         m.readerTitleText = nz2(mk.title, defaultTitle(mk))
         contentY = contentY + 84
@@ -1072,18 +1350,31 @@ sub buildDetail(mk as object)
         cardN.width = qrSize : cardN.height = qrSize : cardN.color = "0xFFFFFFFF"
         cardN.translation = [pad, qy]
         m.detailPanel.appendChild(cardN)
-        ' Show the actual URL under the QR so viewers know what they're scanning.
-        urlLbl = makeLabel(link, "SemiBold", 22, "0x9FB0C0FF", qrSize, 2)
-        urlLbl.translation = [pad, qy + qrSize + 12]
-        m.detailPanel.appendChild(urlLbl)
+        ' Only print the URL under the QR when the body text doesn't already
+        ' show it — otherwise the same link appears twice on the card. §9.8
+        if Instr(1, full, link) = 0 then
+            urlLbl = makeLabel(link, "SemiBold", 22, "0x9FB0C0FF", qrSize, 2)
+            urlLbl.translation = [pad, qy + qrSize + 12]
+            m.detailPanel.appendChild(urlLbl)
+        end if
         m.pendingQr = { link: link, x: pad + 12, y: qy + 12, size: qrSize - 24 }
     end if
 
-    if isNote then m.detailFocusList.push("delete")
-    m.detailFocusList.push("close")
+    ' Focus grid (rows): top controls → images → read-more. Left/right moves
+    ' within a row; up/down between rows. §9.8
+    topRow = ["time"]
+    if isNote then topRow.push("edit")
+    if isNote then topRow.push("delete")
+    m.detailRows = [topRow]
+    if imgKeys.Count() > 0 then m.detailRows.push(imgKeys)
+    if truncated then m.detailRows.push(["readmore"])
 
-    ' Land focus on the timecode so a single OK jumps to the marker.
-    m.detailFocusKey = "time"
+    ' Open with NOTHING highlighted (§9.8): a pre-focused gold "Go to" reads as
+    ' just styled, not focused, so users reflexively OK and accidentally seek.
+    ' The first directional press enters the grid; OK is a no-op until then.
+    m.detailRow = 0
+    m.detailCol = 0
+    m.detailFocusKey = ""
     styleDetail()
 end sub
 
@@ -1144,33 +1435,53 @@ sub styleDetail()
     end for
 end sub
 
-function detailFocusPos() as integer
-    for i = 0 to m.detailFocusList.Count() - 1
-        if m.detailFocusList[i] = m.detailFocusKey then return i
-    end for
-    return 0
-end function
+' Resolve the focus key from the (row, col) grid and restyle.
+sub detailApplyFocus()
+    rows = m.detailRows
+    if m.detailRow < 0 then m.detailRow = 0
+    if m.detailRow > rows.Count() - 1 then m.detailRow = rows.Count() - 1
+    row = rows[m.detailRow]
+    if m.detailCol < 0 then m.detailCol = 0
+    if m.detailCol > row.Count() - 1 then m.detailCol = row.Count() - 1
+    m.detailFocusKey = row[m.detailCol]
+    styleDetail()
+end sub
 
 function handleDetailKeys(key as string) as boolean
     if key = "back" then closeDetail() : return true
-    n = m.detailFocusList.Count()
-    if n = 0 then return true
+    if m.detailRows.Count() = 0 then return true
+    ' Nothing highlighted yet → first directional press enters the grid at the
+    ' top-left; OK does nothing until something is focused. §9.8
+    if m.detailFocusKey = "" then
+        if key = "left" or key = "right" or key = "up" or key = "down" then
+            m.detailRow = 0
+            m.detailCol = 0
+            detailApplyFocus()
+        end if
+        return true
+    end if
     if key = "left" then
-        i = detailFocusPos() - 1
-        if i < 0 then i = 0
-        m.detailFocusKey = m.detailFocusList[i] : styleDetail() : return true
+        m.detailCol = m.detailCol - 1
+        detailApplyFocus() : return true
     end if
     if key = "right" then
-        i = detailFocusPos() + 1
-        if i > n - 1 then i = n - 1
-        m.detailFocusKey = m.detailFocusList[i] : styleDetail() : return true
+        m.detailCol = m.detailCol + 1
+        detailApplyFocus() : return true
+    end if
+    if key = "up" then
+        m.detailRow = m.detailRow - 1
+        detailApplyFocus() : return true
+    end if
+    if key = "down" then
+        m.detailRow = m.detailRow + 1
+        detailApplyFocus() : return true
     end if
     if key = "OK" then
         k = m.detailFocusKey
         if k = "time" then
             seekToMarker()
-        else if k = "close" then
-            closeDetail()
+        else if k = "edit" then
+            editActiveNote()
         else if k = "delete" then
             deleteActiveNote()
         else if k = "readmore" then
@@ -1205,6 +1516,8 @@ sub closeDetail()
     ' Restore: was-playing → resume; was-paused → stay paused.
     if m.wasPlaying then
         m.video.control = "resume"
+        ' Pre-sync UI to playing (same race as closeQrNote).
+        m.isPlaying = true
     else
         m.video.control = "pause"
     end if
@@ -1229,6 +1542,288 @@ sub deleteActiveNote()
     if m.markerIdx > m.markers.Count() - 1 then m.markerIdx = m.markers.Count() - 1
     if m.markerIdx < 0 then m.markerIdx = 0
     closeDetail()
+end sub
+
+sub editActiveNote()
+    if m.activeMarker = invalid or m.activeMarker.type <> "note" then return
+    m.detailModal.visible = false   ' QR overlay replaces the detail card
+    openQrNote(m.activeMarker.id)
+end sub
+
+' ════════════════════════════════════════════════════════════════════════
+'  Add-Note / Edit QR companion (§9.7).
+' ════════════════════════════════════════════════════════════════════════
+sub openQrNote(editNoteId as string)
+    ' Preserve the play state already captured by the detail card (edit flow);
+    ' otherwise capture it now.
+    if m.overlay <> "detail" then m.wasPlaying = m.isPlaying
+    m.video.control = "pause"
+    m.qrEditNoteId = editNoteId
+    m.qrCode = ""
+    m.qrSaved = false
+    m.qrExpired = false
+    m.qrFocus = 0
+    m.qrTimecode = Int(m.position)
+    m.overlay = "qr"
+    buildQrNote()
+    m.qrNote.visible = true
+    updatePauseOverlay()
+    clearHide()
+    mintCode()
+end sub
+
+sub buildQrNote()
+    m.qrPanel.removeChildren(m.qrPanel.getChildren(-1, 0))
+    panelW = 1200 : panelH = 760
+    px = Int((1920 - panelW) / 2) : py = Int((1080 - panelH) / 2)
+    m.qrPanel.translation = [px, py]
+    pad = 56
+
+    bg = CreateObject("roSGNode", "Rectangle")
+    bg.width = panelW : bg.height = panelH : bg.color = "0x10171FFF"
+    m.qrPanel.appendChild(bg)
+
+    ' White QR card + the code node + a loading placeholder.
+    qcard = CreateObject("roSGNode", "Rectangle")
+    qcard.width = 460 : qcard.height = 460 : qcard.color = "0xFFFFFFFF"
+    qcard.translation = [pad, 150]
+    m.qrPanel.appendChild(qcard)
+    m.qrSpinner = makeLabel("Loading…", "SemiBold", 26, "0x8C9EB0FF", 460, 1)
+    m.qrSpinner.horizAlign = "center" : m.qrSpinner.height = 460 : m.qrSpinner.vertAlign = "center"
+    m.qrSpinner.translation = [pad, 150]
+    m.qrPanel.appendChild(m.qrSpinner)
+    m.qrCodeNode = CreateObject("roSGNode", "QRCode")
+    m.qrCodeNode.ecl = "MEDIUM" : m.qrCodeNode.border = 1 : m.qrCodeNode.pixel = 8
+    m.qrCodeNode.darkColor = "0x131A24FF" : m.qrCodeNode.lightColor = "0xFFFFFFFF"
+    m.qrCodeNode.width = 412 : m.qrCodeNode.height = 412
+    m.qrCodeNode.loadDisplayMode = "scaleToFit"
+    m.qrCodeNode.translation = [pad + 24, 174]
+    m.qrPanel.appendChild(m.qrCodeNode)
+
+    rx = pad + 460 + 48
+    rw = panelW - rx - pad
+    head = "Add a note at " + fmt(m.qrTimecode)
+    if m.qrEditNoteId <> "" then head = "Edit note at " + fmt(m.qrTimecode)
+    m.qrHeading = makeLabel(head, "Bold", 40, "0xFFFFFFFF", rw, 2)
+    m.qrHeading.translation = [rx, 150]
+    m.qrPanel.appendChild(m.qrHeading)
+    m.qrStatusLbl = makeLabel("Getting a code…", "SemiBold", 26, "0xC9A84CFF", rw, 1)
+    m.qrStatusLbl.translation = [rx, 230]
+    m.qrPanel.appendChild(m.qrStatusLbl)
+    m.qrInstr = makeLabel("Scan with your phone camera, or in the Reversion app go to Account → " + Chr(34) + "Add/edit a note from your TV" + Chr(34) + " → Scan note QR from TV (or type the code there).", "Regular", 24, "0x9FB0C0FF", rw, 5)
+    m.qrInstr.lineSpacing = 6 : m.qrInstr.translation = [rx, 280]
+    m.qrPanel.appendChild(m.qrInstr)
+    m.qrCodeLbl = makeLabel("Scan it, or enter this code in the app", "Regular", 20, "0x8C9EB0FF", rw, 1)
+    m.qrCodeLbl.translation = [rx, 460]
+    m.qrPanel.appendChild(m.qrCodeLbl)
+    m.qrCodeVal = makeLabel("", "Bold", 48, "0xC9A84CFF", rw, 1)
+    m.qrCodeVal.translation = [rx, 492]
+    m.qrPanel.appendChild(m.qrCodeVal)
+    m.qrShort = makeLabel("", "Regular", 22, "0x8C9EB0FF", rw, 2)
+    m.qrShort.translation = [rx, 566]
+    m.qrPanel.appendChild(m.qrShort)
+
+    ' Expired panel (hidden until the code times out).
+    m.qrExpTitle = makeLabel("Note code expired", "Bold", 44, "0xFFFFFFFF", panelW - pad * 2, 1)
+    m.qrExpTitle.horizAlign = "center" : m.qrExpTitle.translation = [pad, 300]
+    m.qrPanel.appendChild(m.qrExpTitle)
+    m.qrExpBody = makeLabel("This code timed out. Get a fresh code to add your note.", "Regular", 26, "0x9FB0C0FF", panelW - pad * 2, 2)
+    m.qrExpBody.horizAlign = "center" : m.qrExpBody.translation = [pad, 366]
+    m.qrPanel.appendChild(m.qrExpBody)
+
+    ' Action buttons.
+    btn0 = makeActionPill("Continue watching", pad, 664, 400)
+    m.qrPanel.appendChild(btn0.group)
+    btn1 = makeActionPill("Cancel", pad + 400 + 24, 664, 220)
+    m.qrPanel.appendChild(btn1.group)
+    m.qrBtns = [btn0, btn1]
+    m.qrMainNodes = [qcard, m.qrCodeNode, m.qrSpinner, m.qrHeading, m.qrStatusLbl, m.qrInstr, m.qrCodeLbl, m.qrCodeVal, m.qrShort]
+
+    setQrExpiredView(false)
+end sub
+
+sub setQrExpiredView(expired as boolean)
+    for each n in m.qrMainNodes
+        n.visible = not expired
+    end for
+    m.qrExpTitle.visible = expired
+    m.qrExpBody.visible = expired
+    if expired then
+        m.qrBtns[0].label.text = "Get a new code"
+        m.qrBtns[1].label.text = "Close"
+    else
+        m.qrBtns[0].label.text = "Continue watching"
+        m.qrBtns[1].label.text = "Cancel"
+    end if
+    styleQrButtons()
+end sub
+
+sub styleQrButtons()
+    for i = 0 to m.qrBtns.Count() - 1
+        b = m.qrBtns[i]
+        if i = m.qrFocus then
+            b.bg.blendColor = "0xC9A84CFF" : b.label.color = "0x0A1018FF"
+        else
+            b.bg.blendColor = "0x1B2A3AFF" : b.label.color = "0xFFFFFFFF"
+        end if
+    end for
+end sub
+
+sub mintCode()
+    m.qrStatusLbl.text = "Getting a code…"
+    body = { video_id: m.top.videoId, seconds: m.qrTimecode }
+    if m.qrEditNoteId <> "" then body.note_id = m.qrEditNoteId
+    m.qrMintTask = CreateObject("roSGNode", "ApiTask")
+    m.qrMintTask.observeField("response", "onQrMintResponse")
+    m.qrMintTask.request = ApiReq().requestTvNoteCode(body)
+    m.qrMintTask.control = "RUN"
+end sub
+
+sub onQrMintResponse()
+    if m.overlay <> "qr" then return
+    res = m.qrMintTask.response
+    if res = invalid or res.ok <> true or res.data = invalid then
+        m.qrStatusLbl.text = "Could not reach the server. Check your connection."
+        return
+    end if
+    d = res.data
+    m.qrCode = nz(d.code)
+    m.qrCodeVal.text = formatCode(m.qrCode)
+    short = nz(d.short_url)
+    if short <> "" then m.qrShort.text = "No app? Go to " + short
+    scan = nz(d.scan_url)
+    if scan = "" then scan = m.qrCode
+    m.qrPollMs = 3000
+    pi = Int(numOr(d.poll_interval, 3))
+    if pi > 0 then m.qrPollMs = pi * 1000
+    if m.qrPollMs < 2000 then m.qrPollMs = 2000
+    ' Encode the QR (blocks briefly; the panel + spinner are already visible).
+    m.qrCodeNode.text = scan
+    m.qrSpinner.visible = false
+    m.qrStatusLbl.text = "Waiting for your phone…"
+    scheduleQrPoll()
+end sub
+
+sub scheduleQrPoll()
+    if m.qrCode = "" then return
+    m.qrPollTimer.duration = m.qrPollMs / 1000.0
+    m.qrPollTimer.control = "stop"
+    m.qrPollTimer.control = "start"
+end sub
+
+sub onQrPollTimer()
+    if m.overlay <> "qr" or m.qrCode = "" then return
+    m.qrPollTask = CreateObject("roSGNode", "ApiTask")
+    m.qrPollTask.observeField("response", "onQrPollResponse")
+    m.qrPollTask.request = ApiReq().pollTvNoteCode(m.qrCode)
+    m.qrPollTask.control = "RUN"
+end sub
+
+sub onQrPollResponse()
+    if m.overlay <> "qr" then return
+    res = m.qrPollTask.response
+    if res = invalid then scheduleQrPoll() : return
+    if res.status = 404 or res.status = 410 then showQrExpired() : return
+    if res.ok = true and res.data <> invalid then
+        st = nz(res.data.status)
+        if st = "scanned" then
+            m.qrStatusLbl.text = "Scanned — composing on your phone…"
+        else if st = "completed" then
+            onQrSaved()
+            return
+        else if st = "cancelled" then
+            m.qrStatusLbl.text = "Cancelled on your phone."
+            return
+        else if st = "expired" then
+            showQrExpired()
+            return
+        end if
+    end if
+    scheduleQrPoll()
+end sub
+
+sub showQrExpired()
+    m.qrPollTimer.control = "stop"
+    m.qrCode = ""   ' dead code: don't cancel it on close
+    m.qrExpired = true
+    m.qrFocus = 0
+    setQrExpiredView(true)
+end sub
+
+sub onQrSaved()
+    m.qrPollTimer.control = "stop"
+    m.qrSaved = true
+    m.qrStatusLbl.text = "Saved!"
+    loadNotes()
+    txt = "Note saved"
+    if m.qrEditNoteId <> "" then txt = "Note updated"
+    showBanner(txt)
+    closeQrNote()
+end sub
+
+function handleQrKeys(key as string) as boolean
+    if key = "back" then closeQrNote() : return true
+    if key = "left" or key = "right" then
+        if m.qrFocus = 0 then m.qrFocus = 1 else m.qrFocus = 0
+        styleQrButtons()
+        return true
+    end if
+    if key = "OK" then
+        if m.qrExpired and m.qrFocus = 0 then
+            ' Re-mint in place.
+            m.qrExpired = false
+            m.qrFocus = 0
+            setQrExpiredView(false)
+            m.qrSpinner.visible = true
+            mintCode()
+        else
+            closeQrNote()
+        end if
+        return true
+    end if
+    return true
+end function
+
+sub closeQrNote()
+    m.qrPollTimer.control = "stop"
+    ' Best-effort cancel of an unfinished code.
+    if m.qrCode <> "" and not m.qrSaved then
+        ct = CreateObject("roSGNode", "ApiTask")
+        ct.request = ApiReq().cancelTvNoteCode(m.qrCode)
+        ct.control = "RUN"
+        m.qrCancelTask = ct
+    end if
+    m.qrCode = ""
+    m.qrNote.visible = false
+    m.overlay = "none"
+    if m.wasPlaying then
+        m.video.control = "resume"
+        ' Pre-sync UI to playing so the pill/overlay render correctly before the
+        ' async "playing" video state event arrives. onVideoState will no-op since
+        ' m.isPlaying is already true and m.resumed is already set.
+        m.isPlaying = true
+    else
+        m.video.control = "pause"
+    end if
+    showControls("icons")
+end sub
+
+' Mid-dash the code for across-the-room legibility (matches the pairing screen).
+function formatCode(raw as string) as string
+    if raw = invalid or Len(raw) <= 4 then return nz(raw)
+    half = Int(Len(raw) / 2)
+    return Left(raw, half) + "-" + Mid(raw, half + 1)
+end function
+
+sub showBanner(text as string)
+    m.saveBannerText.text = text
+    m.saveBanner.visible = true
+    m.bannerTimer.control = "stop"
+    m.bannerTimer.control = "start"
+end sub
+
+sub onBannerTimer()
+    m.saveBanner.visible = false
 end sub
 
 ' ════════════════════════════════════════════════════════════════════════
@@ -1322,7 +1917,11 @@ sub maybePopup(curr as integer)
     for each mk in m.markers
         s = mk.startsAt
         if s > m.prevPos and s <= curr then
-            showPopup(mk) : exit for
+            ' Gate on per-type pop-up pref (§9.11).
+            allowed = true
+            if mk.type = "note" and not m.notePopups then allowed = false
+            if mk.type <> "note" and not m.annotPopups then allowed = false
+            if allowed then showPopup(mk) : exit for
         end if
     end for
     m.prevPos = curr
@@ -1582,6 +2181,440 @@ sub closeChapters()
     showControls("icons")
 end sub
 
+' ── Up Next / autoplay (§9.12) ──────────────────────────────────────────
+' ── Mode A: next video card + countdown ─────────────────────────────────
+
+sub openUpNextCard()
+    nv = m.payload.next_video
+    if nv = invalid then return
+
+    ' Countdown: clamp to 3–30 s based on remaining playback time.
+    remain = Int(m.duration - m.position)
+    if remain < 3 then remain = 3
+    if remain > 30 then remain = 30
+    m.upNextMs = remain * 1000
+
+    m.overlay = "upnext"
+    m.upNextSel = 0
+    buildUpNextCard(nv)
+    m.upNextCard.visible = true
+    m.upNextTimer.control = "start"
+end sub
+
+sub buildUpNextCard(nv as object)
+    m.upNextCard.removeChildren(m.upNextCard.getChildren(-1, 0))
+
+    cardW = 480 : cardH = 446
+    cx = 1920 - cardW - 40 : cy = 1080 - cardH - 40 - 80   ' above the scrub
+    pad = 28
+
+    bg = CreateObject("roSGNode", "Rectangle")
+    bg.width = cardW : bg.height = cardH
+    bg.color = "0x0E1927F2"
+    bg.translation = [cx, cy]
+    m.upNextCard.appendChild(bg)
+
+    ' Accent bar left edge.
+    bar = CreateObject("roSGNode", "Rectangle")
+    bar.width = 6 : bar.height = cardH : bar.color = "0xC9A84CFF"
+    bar.translation = [cx, cy]
+    m.upNextCard.appendChild(bar)
+
+    ' Vertical cursor walks down the card so rows never overlap.
+    y = cy + pad
+
+    ' "Up Next" label.
+    upLbl = makeLabel("Up Next", "SemiBold", 20, "0xC9A84CFF", cardW - pad * 2, 1)
+    upLbl.translation = [cx + pad, y]
+    m.upNextCard.appendChild(upLbl)
+    y = y + 32
+
+    ' Thumbnail. next_video has no per-video cover, so fall back to the event
+    ' poster (the next video is a sibling in the same event).
+    thumbW = cardW - pad * 2 : thumbH = 120
+    cover = nz2(nv.cover_url, nz2(m.payload.event_poster_url, ""))
+    if cover <> "" then
+        th = CreateObject("roSGNode", "Poster")
+        th.width = thumbW : th.height = thumbH
+        th.loadDisplayMode = "scaleToZoom"
+        th.uri = cover
+        th.translation = [cx + pad, y]
+        m.upNextCard.appendChild(th)
+    end if
+    y = y + thumbH + 14
+
+    ' Title (single line so the layout below stays predictable).
+    ttl = makeLabel(nz2(nv.title, "Next video"), "Bold", 24, "0xFFFFFFFF", cardW - pad * 2, 1)
+    ttl.translation = [cx + pad, y]
+    m.upNextCard.appendChild(ttl)
+    y = y + 36
+
+    ' Countdown label on its own row.
+    m.upNextCountLbl = makeLabel("", "SemiBold", 22, "0x9FB0C0FF", cardW - pad * 2, 1)
+    m.upNextCountLbl.translation = [cx + pad, y]
+    m.upNextCard.appendChild(m.upNextCountLbl)
+    updateUpNextCountLabel()
+
+    ' Buttons row pinned to the bottom of the card.
+    btnY = cy + cardH - pad - 56
+    playW = 180 : dismissW = 160
+    m.upNextPlayBtn = makeActionPill("Play now", cx + cardW - pad - playW, btnY, playW)
+    m.upNextCard.appendChild(m.upNextPlayBtn.group)
+    m.upNextDismissBtn = makeActionPill("Dismiss", cx + cardW - pad - playW - 16 - dismissW, btnY, dismissW)
+    m.upNextCard.appendChild(m.upNextDismissBtn.group)
+
+    styleUpNextCard()
+end sub
+
+sub updateUpNextCountLabel()
+    secs = Int((m.upNextMs + 999) / 1000)
+    if secs < 0 then secs = 0
+    m.upNextCountLbl.text = "Playing in " + secs.ToStr() + "s"
+end sub
+
+sub styleUpNextCard()
+    if m.upNextPlayBtn = invalid then return
+    if m.upNextSel = 0 then
+        m.upNextPlayBtn.bg.blendColor = "0xC9A84CFF" : m.upNextPlayBtn.label.color = "0x0A1018FF"
+        m.upNextDismissBtn.bg.blendColor = "0x1B2A3AFF" : m.upNextDismissBtn.label.color = "0xFFFFFFFF"
+    else
+        m.upNextPlayBtn.bg.blendColor = "0x1B2A3AFF" : m.upNextPlayBtn.label.color = "0xFFFFFFFF"
+        m.upNextDismissBtn.bg.blendColor = "0xC9A84CFF" : m.upNextDismissBtn.label.color = "0x0A1018FF"
+    end if
+end sub
+
+sub onUpNextTick()
+    m.upNextMs = m.upNextMs - 200
+    if m.upNextMs <= 0 then
+        m.upNextMs = 0
+        m.upNextTimer.control = "stop"
+        playNext()
+        return
+    end if
+    updateUpNextCountLabel()
+end sub
+
+sub playNext()
+    nv = m.payload.next_video
+    if nv = invalid then pop() : return
+    nextId = toStr(nv.id)   ' next_video.id is an integer from the API.
+    if nextId = "" then pop() : return
+    closeUpNextCard()
+    markComplete()
+    ' Signal MainScene to replace this player with the next video. §9.12
+    m.top.replaceVideoId = ""
+    m.top.replaceVideoId = nextId
+end sub
+
+sub closeUpNextCard()
+    m.upNextTimer.control = "stop"
+    m.upNextCard.visible = false
+    m.overlay = "none"
+end sub
+
+function handleUpNextKeys(key as string) as boolean
+    if key = "back" or key = "down" then
+        closeUpNextCard()
+        showControls("")
+        return true
+    end if
+    if key = "left" or key = "right" then
+        if m.upNextSel = 0 then m.upNextSel = 1 else m.upNextSel = 0
+        styleUpNextCard()
+        return true
+    end if
+    if key = "OK" then
+        if m.upNextSel = 0 then playNext() else closeUpNextCard() : showControls("")
+        return true
+    end if
+    return true
+end function
+
+' ── Mode B: recommendations grid (last video / no next) ─────────────────
+
+sub openUpNextRecs()
+    m.overlay = "upnext"
+    m.video.control = "pause"
+    m.isPlaying = false
+    m.recsSel = 0
+    m.recsData = []
+    ' Fetch /home for recommendations; filter current event out client-side.
+    t = CreateObject("roSGNode", "ApiTask")
+    t.request = ApiReq().home()
+    t.observeField("response", "onRecsResponse")
+    t.control = "RUN"
+    m.recsTask = t
+    ' Show the panel immediately with a loading state; fill cards on response.
+    buildRecsGrid([])
+    m.upNextRecs.visible = true
+end sub
+
+sub onRecsResponse()
+    resp = m.recsTask.response
+    if resp = invalid or resp.ok <> true or resp.data = invalid then
+        ' Network error — just show exit affordance with no cards.
+        buildRecsGrid([])
+        return
+    end if
+    h = resp.data
+    all = []
+    for each ev in arr(h.recent_events)
+        all.push(ev)
+    end for
+    for each ev in arr(h.upcoming_events)
+        all.push(ev)
+    end for
+
+    ' Dedupe by id, exclude current event, take up to 4.
+    curEventId = toStr(numOr(m.payload.event_id, -1))
+    seen = {}
+    recs = []
+    for each ev in all
+        id = toStr(numOr(ev.id, -1))
+        if id <> curEventId and not seen.DoesExist(id) then
+            seen[id] = true
+            recs.push(ev)
+            if recs.Count() >= 4 then exit for
+        end if
+    end for
+
+    m.recsData = recs
+    buildRecsGrid(recs)
+end sub
+
+sub buildRecsGrid(recs as object)
+    m.recsPanel.removeChildren(m.recsPanel.getChildren(-1, 0))
+    m.recsCardBtns = []
+
+    ' Title.
+    hdr = makeLabel("You might also like", "Bold", 38, "0xFFFFFFFF", 1600, 1)
+    hdr.translation = [160, 120]
+    m.recsPanel.appendChild(hdr)
+
+    hint = makeLabel("Press BACK to exit", "Regular", 22, "0x8C9EB0FF", 1600, 1)
+    hint.translation = [160, 174]
+    m.recsPanel.appendChild(hint)
+
+    if recs.Count() = 0 then
+        loading = makeLabel("Loading…", "Regular", 28, "0x8C9EB0FF", 600, 1)
+        loading.translation = [660, 540]
+        m.recsPanel.appendChild(loading)
+        return
+    end if
+
+    ' Up to 4 poster cards in a row.
+    cardW = 340 : cardH = 480 : gap = 36
+    totalW = recs.Count() * cardW + (recs.Count() - 1) * gap
+    startX = Int((1920 - totalW) / 2)
+    cardY = 260
+
+    for i = 0 to recs.Count() - 1
+        ev = recs[i]
+        cx = startX + i * (cardW + gap)
+
+        grp = CreateObject("roSGNode", "Group")
+        grp.translation = [cx, cardY]
+
+        ' Border (focus indicator).
+        brd = CreateObject("roSGNode", "Rectangle")
+        brd.width = cardW : brd.height = cardH : brd.color = "0x00000000"
+        grp.appendChild(brd)
+
+        ' Poster.
+        poster = CreateObject("roSGNode", "Poster")
+        poster.width = cardW - 8 : poster.height = cardH - 8
+        poster.translation = [4, 4]
+        poster.loadDisplayMode = "scaleToZoom"
+        posterUrl = nz2(ev.poster_url, "")
+        if posterUrl <> "" then poster.uri = SizedImage(posterUrl, cardW)
+        grp.appendChild(poster)
+
+        ' Title label under the card.
+        tlbl = makeLabel(nz2(ev.title, ""), "SemiBold", 22, "0xFFFFFFFF", cardW, 2)
+        tlbl.translation = [0, cardH + 10]
+        grp.appendChild(tlbl)
+
+        m.recsPanel.appendChild(grp)
+        m.recsCardBtns.push({ group: grp, border: brd })
+    end for
+
+    styleRecsGrid()
+end sub
+
+sub styleRecsGrid()
+    for i = 0 to m.recsCardBtns.Count() - 1
+        b = m.recsCardBtns[i]
+        if i = m.recsSel then
+            b.border.color = "0xC9A84CFF"
+        else
+            b.border.color = "0x00000000"
+        end if
+    end for
+end sub
+
+function handleRecsKeys(key as string) as boolean
+    if key = "back" then
+        m.upNextRecs.visible = false
+        m.overlay = "none"
+        pop()
+        return true
+    end if
+    if key = "left" then
+        if m.recsSel > 0 then m.recsSel = m.recsSel - 1 : styleRecsGrid()
+        return true
+    end if
+    if key = "right" then
+        if m.recsSel < m.recsCardBtns.Count() - 1 then m.recsSel = m.recsSel + 1 : styleRecsGrid()
+        return true
+    end if
+    if key = "OK" and m.recsData.Count() > 0 then
+        ev = m.recsData[m.recsSel]
+        id = toStr(numOr(ev.id, -1))
+        if id <> "-1" then
+            m.upNextRecs.visible = false
+            m.overlay = "none"
+            ' Signal MainScene to replace this player with EventDetail. §9.12
+            m.top.replaceEventId = ""
+            m.top.replaceEventId = id
+        end if
+        return true
+    end if
+    return true
+end function
+
+' ── In-player settings pop-up (§9.11) ───────────────────────────────────
+sub openSettings()
+    m.overlay = "settings"
+    m.settingsSel = 0
+    buildSettings()
+    m.settingsModal.visible = true
+end sub
+
+sub buildSettings()
+    m.settingsPanel.removeChildren(m.settingsPanel.getChildren(-1, 0))
+
+    panelW = 560 : pad = 48
+
+    ' Header.
+    hdr = makeLabel("Settings", "Bold", 34, "0xFFFFFFFF", panelW - pad * 2, 1)
+    hdr.translation = [pad, 64]
+    m.settingsPanel.appendChild(hdr)
+
+    div = CreateObject("roSGNode", "Rectangle")
+    div.width = panelW - pad * 2 : div.height = 2 : div.color = "0x2A3848FF"
+    div.translation = [pad, 118]
+    m.settingsPanel.appendChild(div)
+
+    ' Two toggle rows.
+    m.settingsRows = [
+        { key: "annot", label: "Annotation pop-ups", value: m.annotPopups }
+        { key: "notes", label: "Note pop-ups",        value: m.notePopups }
+    ]
+    m.settingsRowBgs  = []
+    m.settingsRowHls  = []
+
+    rowH = 80 : rowY = 148 : gap = 12
+    for i = 0 to m.settingsRows.Count() - 1
+        row = m.settingsRows[i]
+
+        ' Row background.
+        bg = roundedBg(panelW - pad * 2, rowH, "0x1B2A3AFF")
+        bg.translation = [pad, rowY]
+        m.settingsPanel.appendChild(bg)
+        m.settingsRowBgs.push(bg)
+
+        ' Label.
+        lbl = makeLabel(row.label, "SemiBold", 26, "0xFFFFFFFF", panelW - pad * 2 - 100, 1)
+        lbl.translation = [pad + 20, rowY + Int((rowH - 30) / 2)]
+        m.settingsPanel.appendChild(lbl)
+
+        ' Toggle pill (ON/OFF).
+        tglW = 80 : tglH = 40
+        tgl = roundedBg(tglW, tglH, "0x2A3848FF")
+        tgl.translation = [panelW - pad - tglW - 4, rowY + Int((rowH - tglH) / 2)]
+        m.settingsPanel.appendChild(tgl)
+        tglLbl = makeLabel("", "Bold", 20, "0xFFFFFFFF", tglW, 1)
+        tglLbl.horizAlign = "center" : tglLbl.height = tglH : tglLbl.vertAlign = "center"
+        tglLbl.translation = [panelW - pad - tglW - 4, rowY + Int((rowH - tglH) / 2)]
+        m.settingsPanel.appendChild(tglLbl)
+        m.settingsRowHls.push({ bg: tgl, lbl: tglLbl })
+
+        rowY = rowY + rowH + gap
+    end for
+
+    ' Hint.
+    hint = makeLabel("Press BACK to close", "Regular", 20, "0x8C9EB0FF", panelW - pad * 2, 1)
+    hint.horizAlign = "center" : hint.translation = [pad, 1020]
+    m.settingsPanel.appendChild(hint)
+
+    styleSettings()
+end sub
+
+sub styleSettings()
+    for i = 0 to m.settingsRows.Count() - 1
+        row = m.settingsRows[i]
+        focused = (i = m.settingsSel)
+        hl = m.settingsRowHls[i]
+        bg = m.settingsRowBgs[i]
+        if focused then
+            bg.blendColor = "0x223044F2"
+        else
+            bg.blendColor = "0x1B2A3AFF"
+        end if
+        if row.value then
+            hl.bg.blendColor = "0xC9A84CFF"
+            hl.lbl.text = "ON"
+            hl.lbl.color = "0x0A1018FF"
+        else
+            hl.bg.blendColor = "0x2A3848FF"
+            hl.lbl.text = "OFF"
+            hl.lbl.color = "0x8C9EB0FF"
+        end if
+    end for
+end sub
+
+sub toggleSettingsRow(i as integer)
+    cfg = ReversionConfig()
+    if i = 0 then
+        m.annotPopups = not m.annotPopups
+        m.settingsRows[0].value = m.annotPopups
+        RegWrite(cfg.KEY_ANNOTATION_POPUPS, boolStr(m.annotPopups))
+    else
+        m.notePopups = not m.notePopups
+        m.settingsRows[1].value = m.notePopups
+        RegWrite(cfg.KEY_NOTE_POPUPS, boolStr(m.notePopups))
+    end if
+    styleSettings()
+end sub
+
+function handleSettingsKeys(key as string) as boolean
+    if key = "back" then
+        m.settingsModal.visible = false
+        m.overlay = "none"
+        showControls("icons")
+        return true
+    end if
+    if key = "up" then
+        if m.settingsSel > 0 then
+            m.settingsSel = m.settingsSel - 1
+            styleSettings()
+        end if
+        return true
+    end if
+    if key = "down" then
+        if m.settingsSel < m.settingsRows.Count() - 1 then
+            m.settingsSel = m.settingsSel + 1
+            styleSettings()
+        end if
+        return true
+    end if
+    if key = "OK" or key = "left" or key = "right" then
+        toggleSettingsRow(m.settingsSel)
+        return true
+    end if
+    return true
+end function
+
 ' Brief timecode+name bubble + tick above the scrub at the chapter position. §9.2
 sub showChapterFlash(t as integer, title as string)
     total = m.duration
@@ -1630,7 +2663,15 @@ end function
 
 ' ── Exit ────────────────────────────────────────────────────────────────
 sub pop()
-    saveProgress(Int(m.position))
+    ' If we're already past the completion threshold, mark complete on exit
+    ' (write full duration) instead of saving the near-end position. Otherwise
+    ' a short video would save e.g. duration-10 — still below 95% for clips
+    ' under ~3 min — and resume near the very end instead of restarting (§9.13).
+    if m.duration > 0 and m.position >= m.duration - m.END_LEAD then
+        markComplete()
+    else
+        saveProgress(Int(m.position))
+    end if
     m.video.control = "stop"
     m.saveTimer.control = "stop"
     m.top.popped = true
@@ -1639,9 +2680,17 @@ end sub
 ' ── Key routing (explicit; this screen owns focus) ──────────────────────
 function onKeyEvent(key as string, press as boolean) as boolean
     if not press then
-        ' Release ends a hold-seek run.
+        ' Release commits the previewed scrub position to the video.
         if key = "left" or key = "right" or key = "rewind" or key = "fastforward" then
-            m.seekHold = invalid
+            commitSeek()
+        end if
+        ' Release stops N/A bar hold-to-scan and re-arms the chrome auto-hide.
+        if key = "left" or key = "right" then
+            if m.markerHoldDir <> 0 then
+                m.markerHoldDir = 0
+                m.markerRepeatTimer.control = "stop"
+                armHide()
+            end if
         end if
         return false
     end if
@@ -1653,9 +2702,15 @@ function onKeyEvent(key as string, press as boolean) as boolean
 
     ' ── Modal overlay owns keys first (§9.15) ──
     if m.overlay = "chapters" then return handleChaptersKeys(key)
+    if m.overlay = "settings" then return handleSettingsKeys(key)
     if m.overlay = "image" then return handleImageKeys(key)
     if m.overlay = "text" then return handleTextKeys(key)
     if m.overlay = "detail" then return handleDetailKeys(key)
+    if m.overlay = "qr" then return handleQrKeys(key)
+    if m.overlay = "upnext" then
+        if m.upNextCard.visible then return handleUpNextKeys(key)
+        if m.upNextRecs.visible then return handleRecsKeys(key)
+    end if
 
     ' ── BACK (Netflix double-back, §9.10) ──
     if key = "back" then
@@ -1834,4 +2889,9 @@ end function
 
 function nowMillis() as integer
     return m.clock.TotalMilliseconds()
+end function
+
+function boolStr(b as boolean) as string
+    if b then return "true"
+    return "false"
 end function

@@ -9,6 +9,13 @@ sub init()
     m.retryBtn = m.top.findNode("retryBtn")
     m.retryBtn.observeField("buttonSelected", "onRetry")
 
+    m.exitDialog   = m.top.findNode("exitDialog")
+    m.exitCancelBg = m.top.findNode("exitCancelBg")
+    m.exitCancelLabel = m.top.findNode("exitCancelLabel")
+    m.exitConfirmBg = m.top.findNode("exitConfirmBg")
+    m.exitConfirmLabel = m.top.findNode("exitConfirmLabel")
+    m.exitSel = 0
+
     m.code = ""
     m.expiresIn = 0
     m.pollInterval = 5
@@ -146,6 +153,47 @@ sub stopTimers()
     m.firstPollTimer.control = "stop"
     m.pollTimer.control = "stop"
 end sub
+
+' ── Exit dialog ─────────────────────────────────────────────────────────
+sub showExit()
+    m.exitSel = 0
+    styleExit()
+    m.exitDialog.visible = true
+end sub
+
+sub hideExit()
+    m.exitDialog.visible = false
+end sub
+
+sub styleExit()
+    if m.exitSel = 0 then
+        m.exitCancelBg.blendColor = "0xC9A84CFF" : m.exitCancelLabel.color = "0x0F1923FF"
+        m.exitConfirmBg.blendColor = "0x23324AFF" : m.exitConfirmLabel.color = "0xFFFFFFFF"
+    else
+        m.exitCancelBg.blendColor = "0x23324AFF" : m.exitCancelLabel.color = "0xFFFFFFFF"
+        m.exitConfirmBg.blendColor = "0xC9A84CFF" : m.exitConfirmLabel.color = "0x0F1923FF"
+    end if
+end sub
+
+' ── Key routing ──────────────────────────────────────────────────────────
+function onKeyEvent(key as string, press as boolean) as boolean
+    if not press then return false
+    if m.exitDialog.visible then
+        if key = "left" or key = "right" then
+            if m.exitSel = 0 then m.exitSel = 1 else m.exitSel = 0
+            styleExit()
+            return true
+        end if
+        if key = "back" then hideExit() : return true
+        if key = "OK" then
+            if m.exitSel = 0 then hideExit() else m.top.exitApp = true
+            return true
+        end if
+        return false
+    end if
+    if key = "back" then showExit() : return true
+    return false
+end function
 
 ' ── Helpers ─────────────────────────────────────────────────────────────
 ' Group the code in 3s with dashes for readability (§5). If it already has a

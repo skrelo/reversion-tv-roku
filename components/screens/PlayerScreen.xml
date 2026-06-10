@@ -10,6 +10,10 @@
         <field id="videoId" type="string" value="" onChange="onVideoIdSet" />
         <field id="popped" type="boolean" value="false" />
         <field id="signedOut" type="boolean" value="false" />
+        <field id="openVideoId"    type="string" value="" />
+        <field id="openEventId"    type="string" value="" />
+        <field id="replaceVideoId" type="string" value="" />
+        <field id="replaceEventId" type="string" value="" />
     </interface>
 
     <children>
@@ -17,6 +21,12 @@
              bar + the title-top-left / clock-top-right overlay). All chrome here
              is hand-drawn (§9). -->
         <Video id="video" width="1920" height="1080" translation="[0,0]" enableUI="false" />
+
+        <!-- Black cover over the video until playback reaches the resume
+             position, so the user never sees the 0:00 frame flash before the
+             seek lands (§9.2). Hidden in onPosition once we're at the resume
+             point (or immediately when there's no resume). -->
+        <Rectangle id="loadCover" width="1920" height="1080" color="0x000000FF" />
 
         <!-- Netflix pause overlay: dim scrim + left-aligned event wordmark
              (title fallback). No auto-hide; resume clears it. §9.10 -->
@@ -37,10 +47,12 @@
         <!-- Center play/pause flash glyph (Polish). -->
         <Poster id="flash" width="120" height="120" translation="[900,480]" visible="false" blendColor="0xFFFFFFFF" />
 
-        <!-- Hold-to-seek N× indicator (chevron + rate). -->
-        <Group id="seekIndicator" translation="[880,470]" visible="false">
-            <Poster id="seekChevron" width="56" height="56" translation="[0,4]" blendColor="0xFFFFFFFF" />
-            <Label id="seekRate" translation="[64,0]" width="160" color="0xFFFFFFFF">
+        <!-- Hold-to-seek N× indicator (chevron + rate) on a dark rounded plate
+             so it never washes out over a light video frame. -->
+        <Group id="seekIndicator" translation="[862,462]" visible="false">
+            <Poster id="seekIndicatorBg" width="196" height="80" uri="pkg:/images/btn_rounded.9.png" blendColor="0x000000C0" />
+            <Poster id="seekChevron" width="56" height="56" translation="[20,12]" blendColor="0xFFFFFFFF" />
+            <Label id="seekRate" translation="[86,0]" width="92" height="80" vertAlign="center" color="0xFFFFFFFF">
                 <Font role="font" uri="pkg:/fonts/Montserrat-Bold.ttf" size="48" />
             </Label>
         </Group>
@@ -71,9 +83,9 @@
 
             <!-- Scrub bar. -->
             <Group id="scrub" translation="[150,914]">
-                <Rectangle id="scrubTrack" width="1620" height="6" color="0xFFFFFF40" />
-                <Rectangle id="scrubPlayed" width="0" height="6" color="0xC9A84CFF" />
-                <Rectangle id="scrubKnob" width="22" height="22" translation="[-11,-8]" color="0xC9A84CFF" visible="false" />
+                <Poster id="scrubTrack" width="1620" height="6" uri="pkg:/images/btn_rounded.9.png" blendColor="0xFFFFFF40" />
+                <Poster id="scrubPlayed" width="0" height="6" uri="pkg:/images/btn_rounded.9.png" blendColor="0xC9A84CFF" />
+                <Poster id="scrubKnob" width="22" height="22" translation="[-11,-8]" uri="pkg:/images/btn_rounded.9.png" blendColor="0xC9A84CFF" visible="false" />
             </Group>
             <Label id="timeElapsed" translation="[150,936]" width="300" color="0xE7ECF2FF">
                 <Font role="font" uri="pkg:/fonts/Montserrat-SemiBold.ttf" size="26" />
@@ -136,6 +148,26 @@
             </Label>
         </Group>
 
+        <!-- Add-Note / Edit QR companion (§9.7). Panel built in BRS. -->
+        <Group id="qrNote" visible="false">
+            <Rectangle id="qrScrim" width="1920" height="1080" color="0x040810E6" />
+            <Group id="qrPanel" />
+        </Group>
+
+        <!-- Transient save-confirmation banner (bottom-right, §9.7). -->
+        <Group id="saveBanner" translation="[1360,980]" visible="false">
+            <Rectangle id="saveBannerBg" width="500" height="68" color="0x1B7A3AF2" />
+            <Label id="saveBannerText" translation="[28,0]" width="444" height="68" vertAlign="center" color="0xFFFFFFFF">
+                <Font role="font" uri="pkg:/fonts/Montserrat-SemiBold.ttf" size="26" />
+            </Label>
+        </Group>
+
+        <!-- In-player settings pop-up (right sheet): two pop-up toggles. §9.11 -->
+        <Group id="settingsModal" visible="false">
+            <Rectangle id="settingsScrim" width="1920" height="1080" color="0x040810B0" />
+            <Rectangle id="settingsPanel" width="560" height="1080" translation="[1360,0]" color="0x121C28FF" />
+        </Group>
+
         <!-- Chapters pop-up (right sheet): scrollable timecode+title list. The
              only chapter-navigation surface. §9.2 -->
         <Group id="chaptersModal" visible="false">
@@ -148,6 +180,17 @@
                     <LayoutGroup id="chaptersList" layoutDirection="vert" itemSpacings="[6]" />
                 </Group>
             </Rectangle>
+        </Group>
+
+        <!-- Up Next card — Mode A (next video + autoplay on). Bottom-right,
+             built in BRS. §9.12 -->
+        <Group id="upNextCard" visible="false" />
+
+        <!-- Up Next recs grid — Mode B (last video, no next). Full overlay,
+             built in BRS. §9.12 -->
+        <Group id="upNextRecs" visible="false">
+            <Rectangle id="recsScrim" width="1920" height="1080" color="0x040810CC" />
+            <Group id="recsPanel" />
         </Group>
 
         <!-- Chrome fade animations. §9.3 (in ~180ms / out ~240ms). -->
@@ -170,6 +213,18 @@
         <Timer id="chapterFlashTimer" duration="2" repeat="false" />
         <Timer id="popupTimer" duration="6" repeat="false" />
         <Timer id="qrTimer" duration="0.05" repeat="false" />
+        <Timer id="qrPollTimer" duration="3" repeat="false" />
+        <Timer id="bannerTimer" duration="3.2" repeat="false" />
+        <!-- Initial-load watchdog: if playback never starts (e.g. blocked origin
+             → infinite buffering), surface an exitable error instead of a
+             forever spinner. Stopped on the first "playing" transition. -->
+        <Timer id="loadWatchdog" duration="18" repeat="false" />
+        <!-- Up-Next Mode A: countdown ticks every 200 ms. §9.12 -->
+        <Timer id="upNextTimer" duration="0.2" repeat="true" />
+        <!-- Hold-to-seek: ticks every 200 ms while a seek key is held. §9.5 -->
+        <Timer id="seekTimer" duration="0.2" repeat="true" />
+        <!-- N/A bar hold-to-scan: steps markers every 300 ms while held. §9.6 -->
+        <Timer id="markerRepeatTimer" duration="0.3" repeat="true" />
     </children>
 
     <script type="text/brightscript" uri="pkg:/components/screens/PlayerScreen.brs" />

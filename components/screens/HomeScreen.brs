@@ -6,6 +6,8 @@ sub init()
     m.nav = m.top.findNode("nav")
     m.loading = m.top.findNode("loading")
     m.errorLabel = m.top.findNode("errorLabel")
+    m.retryBtn   = m.top.findNode("retryBtn")
+    m.retryBg    = m.top.findNode("retryBg")
     m.emptyLabel = m.top.findNode("emptyLabel")
     m.toast = m.top.findNode("toast")
     m.toastLabel = m.top.findNode("toastLabel")
@@ -50,6 +52,15 @@ sub init()
     m.autoTimer.repeat = true
     m.autoTimer.observeField("fire", "onAutoAdvance")
 
+    ' Guard: for a short beat after an auto-advance flips the slide, swallow an
+    ' OK so a press the user aimed at the PREVIOUS slide doesn't open the
+    ' just-flipped one. Any directional press clears it (user is now in control).
+    m.justAdvanced = false
+    m.advanceGuard = CreateObject("roSGNode", "Timer")
+    m.advanceGuard.duration = 0.5
+    m.advanceGuard.repeat = false
+    m.advanceGuard.observeField("fire", "onAdvanceGuardDone")
+
     m.toastTimer = CreateObject("roSGNode", "Timer")
     m.toastTimer.duration = 2.5
     m.toastTimer.repeat = false
@@ -62,6 +73,8 @@ end sub
 ' ── Data load (parallel GET /home + /library + /me). §6.1 ───────────────
 sub loadData()
     m.loading.visible = true
+    m.errorLabel.visible = false
+    m.retryBtn.visible = false
     m.homeDone = false : m.libDone = false : m.meDone = false
     m.homeRes = invalid : m.libRes = invalid : m.meRes = invalid
 
@@ -107,8 +120,17 @@ sub maybeReady()
         return
     end if
     if m.homeRes = invalid or m.homeRes.ok <> true then
+        if m.homeRes = invalid then
+            print "[Home] /home FAILED — response is invalid (task never returned)"
+        else
+            print "[Home] /home FAILED — status="; m.homeRes.status; " error="; m.homeRes.error
+            if m.homeRes.data <> invalid then print "[Home] /home body="; FormatJson(m.homeRes.data)
+        end if
         m.errorLabel.text = "Could not load content. Check your connection."
         m.errorLabel.visible = true
+        m.retryBtn.visible = true
+        m.retryBg.color = "0x1B2A3AFF"
+        m.top.setFocus(true)
         return
     end if
 
@@ -375,7 +397,8 @@ sub onNavSelect(id as string)
     if id = "settings" then
         m.nav.expanded = false : m.nav.focusedIndex = -1
         m.zone = m.prevZone
-        showToast("Settings arrives in a later pass")
+        m.top.openSettings = false
+        m.top.openSettings = true
         return
     end if
     enterCatalog(id)
@@ -547,6 +570,15 @@ sub onAutoAdvance()
     m.heroBtn = 0
     m.slideIndex = (m.slideIndex + 1) mod m.carousel.Count()
     renderSlide()
+    ' Arm the post-advance OK guard so a press aimed at the prior slide doesn't
+    ' open the freshly-flipped one.
+    m.justAdvanced = true
+    m.advanceGuard.control = "stop"
+    m.advanceGuard.control = "start"
+end sub
+
+sub onAdvanceGuardDone()
+    m.justAdvanced = false
 end sub
 
 ' ── Exit overlay (§6.7) ─────────────────────────────────────────────────
@@ -572,6 +604,22 @@ end sub
 ' ── Key routing (all explicit). §12 ─────────────────────────────────────
 function onKeyEvent(key as string, press as boolean) as boolean
     if not press then return false
+
+    ' Error state: only OK (retry) and BACK (exit prompt) are meaningful.
+    if m.retryBtn.visible then
+        if key = "OK" then
+            m.errorLabel.visible = false
+            m.retryBtn.visible = false
+            loadData()
+            return true
+        end if
+        if key = "back" then
+            showExit()
+            return true
+        end if
+        return true
+    end if
+
     if m.data = invalid then return false
 
     if m.exitDialog.visible then return handleExitKeys(key)
@@ -591,9 +639,19 @@ function handleHeroKeys(key as string) as boolean
     end if
     if key = "up" then return true
     if key = "OK" then
+        ' If the slide just auto-flipped, swallow this OK (it was almost
+        ' certainly aimed at the previous slide) and clear the guard so the
+        ' next OK activates normally.
+        if m.justAdvanced then
+            m.justAdvanced = false
+            m.advanceGuard.control = "stop"
+            return true
+        end if
         heroActivate()
         return true
     end if
+    ' Any directional input means the user is driving — drop the guard.
+    m.justAdvanced = false
     if key = "left" then
         if m.heroBtn = 0 then
             if m.slideIndex > 0 then

@@ -44,7 +44,7 @@ sub init()
         m.iconNodes.push(icon)
 
         lbl = CreateObject("roSGNode", "Label")
-        lbl.width = 300
+        lbl.width = 340
         lbl.height = 64
         lbl.translation = [m.labelX, y]
         lbl.vertAlign = "center"

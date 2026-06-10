@@ -34,6 +34,7 @@ end sub
 sub showPairing()
     resetTo("PairingScreen")
     topScreen().observeField("paired", "onPaired")
+    topScreen().observeField("exitApp", "onExitApp")
 end sub
 
 sub showHome()
@@ -43,6 +44,20 @@ sub showHome()
     home.observeField("exitApp", "onExitApp")
     home.observeField("openEventId", "onOpenEvent")
     home.observeField("openVideoId", "onOpenVideo")
+    home.observeField("openSettings", "onOpenSettings")
+end sub
+
+' Home asked to open Settings (left-nav gear) → push it over Home. §10
+sub onOpenSettings()
+    home = m.stack[0]
+    if home.openSettings <> true then return
+    home.openSettings = false
+    node = CreateObject("roSGNode", "SettingsScreen")
+    node.observeField("popped", "onScreenPopped")
+    node.observeField("signedOut", "onSignedOut")
+    m.host.appendChild(node)
+    m.stack.push(node)
+    node.setFocus(true)
 end sub
 
 ' Home asked to open an event → push Event Detail over it. §7
@@ -73,9 +88,45 @@ sub pushPlayer(videoId as string)
     node.videoId = videoId
     node.observeField("popped", "onScreenPopped")
     node.observeField("signedOut", "onSignedOut")
+    node.observeField("openVideoId", "onChildOpenVideo")
+    node.observeField("openEventId", "onChildOpenEvent")
+    node.observeField("replaceVideoId",  "onReplaceVideo")
+    node.observeField("replaceEventId",  "onReplaceEvent")
     m.host.appendChild(node)
     m.stack.push(node)
     node.setFocus(true)
+end sub
+
+' Up-Next Mode A: pop the current player and push the next video. §9.12
+sub onReplaceVideo()
+    child = topScreen()
+    if child = invalid then return
+    id = child.replaceVideoId
+    if id = invalid or id = "" then return
+    child.replaceVideoId = ""
+    ' Pop the current player.
+    if m.stack.Count() > 1 then
+        m.host.removeChild(child)
+        m.stack.Pop()
+    end if
+    ' Push fresh player for next video.
+    pushPlayer(id)
+end sub
+
+' Up-Next Mode B: pop the current player and open the selected event. §9.12
+sub onReplaceEvent()
+    child = topScreen()
+    if child = invalid then return
+    id = child.replaceEventId
+    if id = invalid or id = "" then return
+    child.replaceEventId = ""
+    ' Pop the current player.
+    if m.stack.Count() > 1 then
+        m.host.removeChild(child)
+        m.stack.Pop()
+    end if
+    ' Push EventDetail.
+    pushEvent(id)
 end sub
 
 ' Home asked to play a video (hero Watch with a target). §6 / §9
@@ -118,8 +169,8 @@ sub onScreenPopped()
 end sub
 
 sub onExitApp()
-    home = topScreen()
-    if home <> invalid and home.exitApp = true then
+    s = topScreen()
+    if s <> invalid and s.exitApp = true then
         m.top.exitApp = true
     end if
 end sub

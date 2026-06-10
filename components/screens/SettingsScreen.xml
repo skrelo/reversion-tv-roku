@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<!-- Settings (TV_APP_SPEC §10). 2-pane: LEFT = section tabs
+     (Playback / Account / Privacy / Info / Sign Out), RIGHT = detail pane rebuilt
+     per section. This screen owns focus explicitly (children render highlight
+     from state) like Home/Detail/Player (§12). It does NOT show the app left nav;
+     its left column IS the section tabs. BACK pops the screen (or, in the pane,
+     returns to the tab; in the legal reader, closes the reader). §10.6
+
+     (Platform — Roku) The §10.1 "Default Playback Speed" chips are omitted: Roku
+     exposes no public arbitrary VOD playback-rate API, so a speed control here
+     would be a dead toggle. Playback therefore contains only Autoplay Next. -->
+<component name="SettingsScreen" extends="Group">
+    <interface>
+        <field id="signedOut" type="boolean" value="false" />
+        <field id="popped" type="boolean" value="false" />
+    </interface>
+
+    <children>
+        <Rectangle id="bg" width="1920" height="1080" color="0x0F1923FF" />
+
+        <Label id="screenTitle" text="Settings" translation="[150,104]" color="0xFFFFFFFF">
+            <Font role="font" uri="pkg:/fonts/Montserrat-Bold.ttf" size="52" />
+        </Label>
+
+        <!-- LEFT: section tabs (built in BRS). -->
+        <Group id="tabs" translation="[150,248]" />
+
+        <!-- RIGHT: detail pane (rebuilt per section in BRS). -->
+        <Group id="pane" translation="[640,236]" />
+
+        <!-- Measures the legal-doc body height one frame after it renders so the
+             scroll clamp is correct (boundingRect is only valid post-layout). -->
+        <Timer id="docLayoutTimer" duration="0.05" repeat="false" />
+    </children>
+
+    <script type="text/brightscript" uri="pkg:/components/screens/SettingsScreen.brs" />
+    <script type="text/brightscript" uri="pkg:/components/lib/Config.brs" />
+    <script type="text/brightscript" uri="pkg:/components/lib/Registry.brs" />
+    <script type="text/brightscript" uri="pkg:/components/lib/Api.brs" />
+    <script type="text/brightscript" uri="pkg:/components/lib/Models.brs" />
+</component>

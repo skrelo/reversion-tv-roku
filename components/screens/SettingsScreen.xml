@@ -28,6 +28,37 @@
         <!-- RIGHT: detail pane (rebuilt per section in BRS). -->
         <Group id="pane" translation="[640,236]" />
 
+        <!-- Legal reader, an "iframe"-style box. Static so the clippingRect is
+             honored reliably (setting it on a code-built Group did not clip). The
+             body scrolls inside docClip via its own translation; the box can never
+             bleed past the title or the panel edges. Shown over the pane. §10.3 -->
+        <!-- Full-height right window. The body scrolls inside docBox; opaque
+             covers run all the way to the screen top (y0) and bottom (y1080) so
+             content can NEVER escape above the title or below the hint, no matter
+             how far it scrolls (clippingRect alone was not honored on scroll). -->
+        <Group id="docReader" translation="[640,0]" visible="false">
+            <Rectangle id="docPanel" width="1186" height="1080" translation="[-28,0]" color="0x16222EFF" />
+            <Poster id="docBox" width="1114" height="800" translation="[8,168]" uri="pkg:/images/btn_rounded.9.png" blendColor="0x0B131CFF" />
+
+            <Group id="docClip" translation="[8,168]" clippingRect="[0,0,1114,800]">
+                <Label id="docBody" translation="[24,24]" width="1066" wrap="true" maxLines="1200" lineSpacing="8" color="0xE6ECF2FF">
+                    <Font role="font" uri="pkg:/fonts/Montserrat-Regular.ttf" size="25" />
+                </Label>
+            </Group>
+
+            <!-- Top cover (screen top → box top) + title on top of it. -->
+            <Rectangle id="docTopMask" width="1186" height="168" translation="[-28,0]" color="0x16222EFF" />
+            <Label id="docTitle" translation="[8,92]" width="1114" maxLines="1" color="0xFFFFFFFF">
+                <Font role="font" uri="pkg:/fonts/Montserrat-Bold.ttf" size="32" />
+            </Label>
+
+            <!-- Bottom cover (box bottom → screen bottom) + hint on top of it. -->
+            <Rectangle id="docBotMask" width="1186" height="112" translation="[-28,968]" color="0x16222EFF" />
+            <Label id="docHint" translation="[8,1000]" width="1114" color="0x8C9EB0FF">
+                <Font role="font" uri="pkg:/fonts/Montserrat-SemiBold.ttf" size="22" />
+            </Label>
+        </Group>
+
         <!-- Measures the legal-doc body height one frame after it renders so the
              scroll clamp is correct (boundingRect is only valid post-layout). -->
         <Timer id="docLayoutTimer" duration="0.05" repeat="false" />

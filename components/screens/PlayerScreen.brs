@@ -133,7 +133,16 @@ sub init()
     cfg = ReversionConfig()
     m.annotPopups = (RegRead(cfg.KEY_ANNOTATION_POPUPS) <> "false")
     m.notePopups  = (RegRead(cfg.KEY_NOTE_POPUPS)       <> "false")
-    m.settingsSel = 0   ' 0 = annotation row, 1 = note row
+    m.settingsSel = 0   ' 0 = annotation row, 1 = note row, 2 = playback speed
+
+    ' §9.11 row 3 / §10.1 Playback speed. Same registry key + format as the
+    ' Settings screen so the chosen speed is the shared default. NOTE: Roku's
+    ' Video node has no public arbitrary VOD playback-rate API, so this can't be
+    ' applied mid-stream (§9.2 Platform — Roku); the pref persists for parity and
+    ' becomes the default for subsequent videos.
+    m.speedVals   = [0.5, 0.75, 1.0, 1.25, 1.5, 2.0]
+    m.speedLabels = ["0.5x", "0.75x", "Normal", "1.25x", "1.5x", "2x"]
+    m.playbackSpeed = numOr(RegRead(cfg.KEY_PLAYBACK_SPEED), 1.0)
 
     ' §9.12 Up Next / autoplay — read autoplay pref, default on.
     m.autoplayNext = (RegRead(cfg.KEY_AUTOPLAY_NEXT) <> "false")
@@ -1186,7 +1195,7 @@ end sub
 
 ' Overlays that force the video to stay paused while open.
 function overlayPausing() as boolean
-    return (m.overlay = "detail" or m.overlay = "image" or m.overlay = "text" or m.overlay = "qr")
+    return (m.overlay = "detail" or m.overlay = "image" or m.overlay = "text" or m.overlay = "qr" or m.overlay = "settings")
 end function
 
 sub buildDetail(mk as object)
@@ -2484,10 +2493,17 @@ end function
 
 ' ── In-player settings pop-up (§9.11) ───────────────────────────────────
 sub openSettings()
+    ' Pause while the gear pop-up is open (the sheet draws a scrim over the
+    ' video) and restore the prior play-state on close — same pattern as the
+    ' detail card / QR (§9.8/§9.7).
+    m.wasPlaying = m.isPlaying
     m.overlay = "settings"
+    m.video.control = "pause"
     m.settingsSel = 0
     buildSettings()
     m.settingsModal.visible = true
+    updatePauseOverlay()
+    clearHide()
 end sub
 
 sub buildSettings()
@@ -2505,10 +2521,11 @@ sub buildSettings()
     div.translation = [pad, 118]
     m.settingsPanel.appendChild(div)
 
-    ' Two toggle rows.
+    ' Two toggle rows + the playback-speed cycler (§9.11).
     m.settingsRows = [
-        { key: "annot", label: "Annotation pop-ups", value: m.annotPopups }
-        { key: "notes", label: "Note pop-ups",        value: m.notePopups }
+        { key: "annot", kind: "toggle", label: "Annotation pop-ups", value: m.annotPopups }
+        { key: "notes", kind: "toggle", label: "Note pop-ups",        value: m.notePopups }
+        { key: "speed", kind: "speed",  label: "Playback speed" }
     ]
     m.settingsRowBgs  = []
     m.settingsRowHls  = []
@@ -2528,16 +2545,29 @@ sub buildSettings()
         lbl.translation = [pad + 20, rowY + Int((rowH - 30) / 2)]
         m.settingsPanel.appendChild(lbl)
 
-        ' Toggle pill (ON/OFF).
-        tglW = 80 : tglH = 40
-        tgl = roundedBg(tglW, tglH, "0x2A3848FF")
-        tgl.translation = [panelW - pad - tglW - 4, rowY + Int((rowH - tglH) / 2)]
-        m.settingsPanel.appendChild(tgl)
-        tglLbl = makeLabel("", "Bold", 20, "0xFFFFFFFF", tglW, 1)
-        tglLbl.horizAlign = "center" : tglLbl.height = tglH : tglLbl.vertAlign = "center"
-        tglLbl.translation = [panelW - pad - tglW - 4, rowY + Int((rowH - tglH) / 2)]
-        m.settingsPanel.appendChild(tglLbl)
-        m.settingsRowHls.push({ bg: tgl, lbl: tglLbl })
+        if row.kind = "speed" then
+            ' Chevron-wrapped speed chip ( e.g.  < Normal > ).
+            chipW = 200 : chipH = 44
+            chip = roundedBg(chipW, chipH, "0x2A3848FF")
+            chip.translation = [panelW - pad - chipW - 4, rowY + Int((rowH - chipH) / 2)]
+            m.settingsPanel.appendChild(chip)
+            chipLbl = makeLabel("", "Bold", 22, "0xFFFFFFFF", chipW, 1)
+            chipLbl.horizAlign = "center" : chipLbl.height = chipH : chipLbl.vertAlign = "center"
+            chipLbl.translation = [panelW - pad - chipW - 4, rowY + Int((rowH - chipH) / 2)]
+            m.settingsPanel.appendChild(chipLbl)
+            m.settingsRowHls.push({ bg: chip, lbl: chipLbl, kind: "speed" })
+        else
+            ' Toggle pill (ON/OFF).
+            tglW = 80 : tglH = 40
+            tgl = roundedBg(tglW, tglH, "0x2A3848FF")
+            tgl.translation = [panelW - pad - tglW - 4, rowY + Int((rowH - tglH) / 2)]
+            m.settingsPanel.appendChild(tgl)
+            tglLbl = makeLabel("", "Bold", 20, "0xFFFFFFFF", tglW, 1)
+            tglLbl.horizAlign = "center" : tglLbl.height = tglH : tglLbl.vertAlign = "center"
+            tglLbl.translation = [panelW - pad - tglW - 4, rowY + Int((rowH - tglH) / 2)]
+            m.settingsPanel.appendChild(tglLbl)
+            m.settingsRowHls.push({ bg: tgl, lbl: tglLbl, kind: "toggle" })
+        end if
 
         rowY = rowY + rowH + gap
     end for
@@ -2561,7 +2591,16 @@ sub styleSettings()
         else
             bg.blendColor = "0x1B2A3AFF"
         end if
-        if row.value then
+        if row.kind = "speed" then
+            ' Chevron-wrapped current speed; focus highlights the chip border.
+            hl.lbl.text = Chr(8249) + " " + speedLabel() + " " + Chr(8250)
+            hl.lbl.color = "0xFFFFFFFF"
+            if focused then
+                hl.bg.blendColor = "0x3A4C63FF"
+            else
+                hl.bg.blendColor = "0x2A3848FF"
+            end if
+        else if row.value then
             hl.bg.blendColor = "0xC9A84CFF"
             hl.lbl.text = "ON"
             hl.lbl.color = "0x0A1018FF"
@@ -2571,6 +2610,34 @@ sub styleSettings()
             hl.lbl.color = "0x8C9EB0FF"
         end if
     end for
+end sub
+
+function speedIndex() as integer
+    for i = 0 to m.speedVals.Count() - 1
+        if Abs(m.speedVals[i] - m.playbackSpeed) < 0.01 then return i
+    end for
+    return 2   ' default Normal (1x)
+end function
+
+function speedLabel() as string
+    return m.speedLabels[speedIndex()]
+end function
+
+' Cycles playback speed forward on OK/RIGHT, backward on LEFT (§9.11). Persists
+' the same key/format as the Settings screen. Roku can't apply it mid-stream
+' (§9.2 Platform — Roku) so this only updates the stored default.
+sub cycleSpeed(key as string)
+    idx = speedIndex()
+    if key = "left" then
+        idx = idx - 1
+        if idx < 0 then idx = m.speedVals.Count() - 1
+    else
+        idx = idx + 1
+        if idx > m.speedVals.Count() - 1 then idx = 0
+    end if
+    m.playbackSpeed = m.speedVals[idx]
+    RegWrite(ReversionConfig().KEY_PLAYBACK_SPEED, Str(m.playbackSpeed).Trim())
+    styleSettings()
 end sub
 
 sub toggleSettingsRow(i as integer)
@@ -2591,6 +2658,15 @@ function handleSettingsKeys(key as string) as boolean
     if key = "back" then
         m.settingsModal.visible = false
         m.overlay = "none"
+        ' Restore: was-playing → resume; was-paused → stay paused.
+        if m.wasPlaying then
+            m.video.control = "resume"
+            m.isPlaying = true
+        else
+            m.video.control = "pause"
+            m.isPlaying = false
+        end if
+        updatePauseOverlay()
         showControls("icons")
         return true
     end if
@@ -2609,7 +2685,11 @@ function handleSettingsKeys(key as string) as boolean
         return true
     end if
     if key = "OK" or key = "left" or key = "right" then
-        toggleSettingsRow(m.settingsSel)
+        if m.settingsRows[m.settingsSel].kind = "speed" then
+            cycleSpeed(key)
+        else
+            toggleSettingsRow(m.settingsSel)
+        end if
         return true
     end if
     return true

@@ -2958,10 +2958,10 @@ function roundedBg(w as integer, h as integer, color as string) as object
     return p
 end function
 
-function glyph(icon as string, size as integer, pos as object, color as string) as object
+function glyph(icon as string, size as integer, xy as object, color as string) as object
     p = CreateObject("roSGNode", "Poster")
     p.width = size : p.height = size
-    p.translation = pos
+    p.translation = xy
     p.uri = "pkg:/images/icons/" + icon
     p.blendColor = color
     return p

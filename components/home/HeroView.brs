@@ -12,7 +12,12 @@ sub init()
     m.contentAnim = m.top.findNode("contentAnim")
     m.contentOpacInterp = m.top.findNode("contentOpacInterp")
     m.wordmarkOpacInterp = m.top.findNode("wordmarkOpacInterp")
+    m.slideAnim = m.top.findNode("slideAnim")
+    m.contentSlideInterp = m.top.findNode("contentSlideInterp")
+    m.wordmarkSlideInterp = m.top.findNode("wordmarkSlideInterp")
     m.wordmark = m.top.findNode("wordmark")
+    m.slideDir = 1   ' 1 = forward (right→left), -1 = backward (left→right)
+    m.prevSlideIndex = 0
 
     ' The content column is bottom-anchored: its action row must sit at the same
     ' Y on every slide whether or not a description is present. LayoutGroup grows
@@ -33,16 +38,33 @@ sub init()
     m.mylistBg = invalid : m.mylistIcon = invalid
     m.infoBg = invalid : m.infoIcon = invalid
 
+    ' Track last-rendered state to skip re-animation on no-change renders
+    ' (e.g. returning from nav to the same slide).
+    m.renderedMode = ""
+    m.renderedSlideIdx = -1
+
     onHeightChanged()
 end sub
 
 ' ── Render ──────────────────────────────────────────────────────────────
 sub render()
-    if m.top.mode = "spotlight" then
+    newMode = m.top.mode
+    newIdx = m.top.slideIndex
+
+    ' If the mode + slide index haven't changed, just update buttons —
+    ' don't rebuild content or re-trigger the slide-in animation.
+    if newMode = m.renderedMode and newMode = "carousel" and newIdx = m.renderedSlideIdx then
+        updateButtons()
+        return
+    end if
+
+    if newMode = "spotlight" then
         renderSpotlight()
     else
         renderCarousel()
     end if
+    m.renderedMode = newMode
+    m.renderedSlideIdx = newIdx
     onHeightChanged()
     updateButtons()
 end sub
@@ -56,6 +78,15 @@ sub renderCarousel()
         buildDots()
         return
     end if
+
+    ' Detect slide direction for horizontal transition.
+    idx = m.top.slideIndex
+    if idx > m.prevSlideIndex then
+        m.slideDir = 1
+    else if idx < m.prevSlideIndex then
+        m.slideDir = -1
+    end if
+    m.prevSlideIndex = idx
 
     setBackdrop(s.backdropUrl)
 
@@ -152,12 +183,33 @@ end sub
 sub onContentLayout()
     r = m.content.boundingRect()
     h = 0
-    if r <> invalid then h = r.height   ' boundingRect keys are x/y/width/height
-    if h > 0 then m.content.translation = [150, m.pendingContentBottom - h]
+    if r <> invalid then h = r.height
+    targetY = m.pendingContentBottom - h
+    if h <= 0 then targetY = m.pendingContentBottom - 240
+    targetX = 150
+    m.content.translation = [targetX, targetY]
+
+    ' Horizontal slide: content glides in from the direction of navigation.
+    slideOffset = 120 * m.slideDir
+    startX = targetX + slideOffset
+    m.slideAnim.control = "stop"
+    m.contentSlideInterp.keyValue = [[startX, targetY], [targetX, targetY]]
+
+    ' Wordmark slides too (if visible).
+    wmPos = m.wordmark.translation
+    if m.wordmark.visible and wmPos <> invalid then
+        wmStartX = wmPos[0] + slideOffset
+        m.wordmarkSlideInterp.keyValue = [[wmStartX, wmPos[1]], [wmPos[0], wmPos[1]]]
+    else
+        m.wordmarkSlideInterp.keyValue = [[0, 0], [0, 0]]
+    end if
+
+    ' Fade + slide together.
     m.contentAnim.control = "stop"
     m.contentOpacInterp.keyValue = [0.0, 1.0]
     m.wordmarkOpacInterp.keyValue = [0.0, 1.0]
     m.contentAnim.control = "start"
+    m.slideAnim.control = "start"
 end sub
 
 ' Append the visible column children with per-gap spacings (vertical
@@ -239,23 +291,27 @@ function makeActions(s as object) as object
     row.itemSpacings = [18]
     row.vertAlignment = "center"
 
+    label = nz(s.watchLabel)
     if s.hasTarget = true then
-        label = nz(s.watchLabel)
         if label = "" then label = "Watch"
-        pillW = 200
-        if label = "Continue" then pillW = 236
-        watch = CreateObject("roSGNode", "Group")
-        m.watchBg = roundedBg(pillW, 64, "0xFFFFFF26")
-        watch.appendChild(m.watchBg)
-        m.watchIcon = glyph("ic_play.png", 26, [26, 19], "0xFFFFFFFF")
-        watch.appendChild(m.watchIcon)
-        m.watchLabel = makeLabel(label, "Bold", 26, "0xFFFFFFFF", pillW - 70, 1)
-        m.watchLabel.translation = [62, 0]
-        m.watchLabel.height = 64
-        m.watchLabel.vertAlign = "center"
-        watch.appendChild(m.watchLabel)
-        row.appendChild(watch)
+    else
+        label = "View"
     end if
+    pillW = 200
+    if label = "Continue" then pillW = 236
+    watch = CreateObject("roSGNode", "Group")
+    m.watchBg = roundedBg(pillW, 64, "0xFFFFFF26")
+    watch.appendChild(m.watchBg)
+    iconName = "ic_play.png"
+    if not s.hasTarget then iconName = "ic_info.png"
+    m.watchIcon = glyph(iconName, 26, [26, 19], "0xFFFFFFFF")
+    watch.appendChild(m.watchIcon)
+    m.watchLabel = makeLabel(label, "Bold", 26, "0xFFFFFFFF", pillW - 70, 1)
+    m.watchLabel.translation = [62, 0]
+    m.watchLabel.height = 64
+    m.watchLabel.vertAlign = "center"
+    watch.appendChild(m.watchLabel)
+    row.appendChild(watch)
 
     mylist = CreateObject("roSGNode", "Group")
     m.mylistBg = roundedBg(64, 64, "0xFFFFFF26")
@@ -284,10 +340,10 @@ function roundedBg(w as integer, h as integer, color as string) as object
     return p
 end function
 
-function glyph(icon as string, size as integer, pos as object, color as string) as object
+function glyph(icon as string, size as integer, xy as object, color as string) as object
     p = CreateObject("roSGNode", "Poster")
     p.width = size : p.height = size
-    p.translation = pos
+    p.translation = xy
     p.uri = "pkg:/images/icons/" + icon
     p.blendColor = color
     return p

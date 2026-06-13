@@ -5,14 +5,74 @@ sub init()
     ' preserves its scroll/focus state when we pop back. §6.7 / §7.
     m.stack = []
 
+    ' Certification performance beacons (cert 3.2). The OS fires AppLaunchInitiate
+    ' automatically; we must fire AppLaunchComplete once the Home page is rendered.
+    ' Pairing is a login dialog shown before Home, so it gets AppDialog beacons.
+    ' Fire each only once for the launch sequence.
+    m.launchComplete = false
+
+    ' A deep link captured before auth completes; routed once Home is up. §5
+    m.pendingDeepLink = invalid
+
     ' Auth gate on boot. §2 / §5.
     token = GetAuthToken()
     if token <> invalid and token <> "" then
         showHome()
     else
-        showPairing()
+        showSignIn()
+    end if
+
+    ' Deep link on cold launch (cert RP 5.x). Stash it; routeDeepLink runs it now
+    ' if we're already Home, or defers until sign-in completes.
+    if m.top.launchArgs <> invalid then routeDeepLink(m.top.launchArgs)
+end sub
+
+' ── Deep linking (cert RP 5.x) ─────────────────────────────────────────
+' roInput delivered a deep link while we're running (main.brs forwards it).
+sub onInputArgs()
+    if m.top.inputArgs <> invalid then routeDeepLink(m.top.inputArgs)
+end sub
+
+' Validate contentId + mediaType (case-insensitive keys) and open the content.
+' Videos play directly; events open their detail springboard. Invalid/empty →
+' do nothing (we're already on Home or sign-in). If not yet authed, defer until
+' Home is shown (onAuthed drains m.pendingDeepLink).
+sub routeDeepLink(args as object)
+    if args = invalid then return
+    contentId = ciGet(args, "contentid")
+    mediaType = LCase(ciGet(args, "mediatype"))
+    if contentId = "" then return
+
+    token = GetAuthToken()
+    if token = invalid or token = "" then
+        m.pendingDeepLink = { contentId: contentId, mediaType: mediaType }
+        return
+    end if
+
+    ' Make sure we're at the Home root before pushing content over it.
+    if m.stack.Count() = 0 or m.stack[0].subtype() <> "HomeScreen" then showHome()
+
+    if mediaType = "series" or mediaType = "season" then
+        pushEvent(contentId)
+    else
+        ' movie / episode / shortformvideo / tvspecial / livefeed / sportsevent
+        ' (and anything else) → treat the id as a video and play it directly.
+        pushPlayer(contentId)
     end if
 end sub
+
+' Case-insensitive lookup over an roAssociativeArray (deep link keys vary in
+' case: contentId vs contentid, mediaType vs mediatype).
+function ciGet(aa as object, lowerKey as string) as string
+    if aa = invalid then return ""
+    for each k in aa
+        if LCase(k) = lowerKey then
+            v = aa[k]
+            if v <> invalid then return v.ToStr()
+        end if
+    end for
+    return ""
+end function
 
 function topScreen() as object
     if m.stack.Count() = 0 then return invalid
@@ -31,10 +91,15 @@ sub resetTo(nodeName as string)
     node.setFocus(true)
 end sub
 
-sub showPairing()
-    resetTo("PairingScreen")
-    topScreen().observeField("paired", "onPaired")
+sub showSignIn()
+    ' Sign-in is a login dialog shown before Home → AppDialog beacons (cert 3.2).
+    ' Only the launch-time sign-in counts; a later re-auth (after sign-out) skips it.
+    fireDialog = not m.launchComplete
+    if fireDialog then m.top.signalBeacon("AppDialogInitiate")
+    resetTo("SignInScreen")
+    topScreen().observeField("authed", "onAuthed")
     topScreen().observeField("exitApp", "onExitApp")
+    if fireDialog then m.top.signalBeacon("AppDialogComplete")
 end sub
 
 sub showHome()
@@ -45,6 +110,13 @@ sub showHome()
     home.observeField("openEventId", "onOpenEvent")
     home.observeField("openVideoId", "onOpenVideo")
     home.observeField("openSettings", "onOpenSettings")
+    home.observeField("openSearch", "onOpenSearch")
+
+    ' Home is the fully-rendered launch UI → AppLaunchComplete (cert 3.2), once.
+    if not m.launchComplete then
+        m.top.signalBeacon("AppLaunchComplete")
+        m.launchComplete = true
+    end if
 end sub
 
 ' Home asked to open Settings (left-nav gear) → push it over Home. §10
@@ -55,6 +127,21 @@ sub onOpenSettings()
     node = CreateObject("roSGNode", "SettingsScreen")
     node.observeField("popped", "onScreenPopped")
     node.observeField("signedOut", "onSignedOut")
+    m.host.appendChild(node)
+    m.stack.push(node)
+    node.setFocus(true)
+end sub
+
+' Home asked to open Search (left-nav search icon). §8
+sub onOpenSearch()
+    home = m.stack[0]
+    if home.openSearch <> true then return
+    home.openSearch = false
+    node = CreateObject("roSGNode", "SearchScreen")
+    node.observeField("popped", "onScreenPopped")
+    node.observeField("signedOut", "onSignedOut")
+    node.observeField("openEventId", "onChildOpenEvent")
+    node.observeField("openVideoId", "onChildOpenVideo")
     m.host.appendChild(node)
     m.stack.push(node)
     node.setFocus(true)
@@ -175,17 +262,27 @@ sub onExitApp()
     end if
 end sub
 
-sub onPaired()
+sub onAuthed()
     p = topScreen()
-    if p <> invalid and p.paired = true then
+    if p <> invalid and p.authed = true then
         showHome()
+        ' Run any deep link the user arrived with before signing in. §5
+        if m.pendingDeepLink <> invalid then
+            dl = m.pendingDeepLink
+            m.pendingDeepLink = invalid
+            if dl.mediaType = "series" or dl.mediaType = "season" then
+                pushEvent(dl.contentId)
+            else
+                pushPlayer(dl.contentId)
+            end if
+        end if
     end if
 end sub
 
-' A 401 anywhere → token dead → tear down everything and go to Pairing. §2
+' A 401 anywhere → token dead → tear down everything and go to Sign-in. §2
 sub onSignedOut()
     ClearAuthToken()
-    showPairing()
+    showSignIn()
 end sub
 
 ' Global key routing. Screens handle their own keys first (focus chain);

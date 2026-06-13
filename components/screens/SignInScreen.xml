@@ -1,0 +1,79 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<!-- On-device sign-in (Roku on-device authentication, cert 2.2 / 4.1). A real
+     full-screen sign-in page — NOT a dialog. A persistent on-screen DynamicKeyboard
+     (voice-capable, OS 11.5+; the channel min-firmware is 11.5 so it always
+     exists) sits centered with our own pill buttons below it. Passwordless
+     email-code flow:
+       1) email phase -> POST /login/send-code
+       2) code phase  -> POST /login/verify-code -> store token -> Home
+     Focus is explicit: the screen toggles between the keyboard and the button
+     row (the screen owns key routing; buttons render highlight from state). -->
+<!-- initialFocus routes focus to the keyboard when MainScene focuses this screen
+     group. Voice dictation only lands in the keyboard's internal VoiceTextEditBox
+     when that box is the focused node; without this, the mic falls through to the
+     OS global channel search (per Roku's dynamic-keyboard sample). -->
+<component name="SignInScreen" extends="Group" initialFocus="keyboard">
+    <interface>
+        <field id="authed" type="boolean" value="false" />
+        <field id="exitApp" type="boolean" value="false" />
+    </interface>
+
+    <children>
+        <Rectangle id="bg" width="1920" height="1080" color="0x0F1923FF" />
+
+        <!-- Transparent brand lockup, top-left (mirrors Pairing/§5). -->
+        <Poster id="brand" uri="pkg:/images/brand_lockup.png" translation="[96,64]"
+                width="300" height="116" loadDisplayMode="scaleToFit" />
+
+        <Label id="title" text="Sign in" translation="[0,118]" width="1920" horizAlign="center" color="0xFFFFFFFF">
+            <Font role="font" uri="pkg:/fonts/Montserrat-Bold.ttf" size="50" />
+        </Label>
+        <Label id="subtitle" text="" translation="[360,196]" width="1200" horizAlign="center" wrap="true" maxLines="2" color="0xF0EBE3FF">
+            <Font role="font" uri="pkg:/fonts/Montserrat-Regular.ttf" size="28" />
+        </Label>
+
+        <!-- Voice-capable full keyboard (stock DynamicKeyboard). Centered + the
+             rows below it are placed from its measured bounds in BRS (layoutTimer)
+             so nothing overlaps. -->
+        <DynamicKeyboard id="keyboard" translation="[560,320]" />
+
+        <!-- Pill buttons (built in BRS; count differs per phase). -->
+        <Group id="buttonRow" translation="[760,820]" />
+
+        <Label id="status" text="" translation="[360,930]" width="1200" horizAlign="center" wrap="true" maxLines="2" color="0x8C9EB0FF">
+            <Font role="font" uri="pkg:/fonts/Montserrat-Regular.ttf" size="26" />
+        </Label>
+
+        <!-- Exit confirmation (mirrors Pairing/Home §6.7). -->
+        <Group id="exitDialog" visible="false">
+            <Rectangle id="exitScrim" width="1920" height="1080" color="0x0A0F16E6" />
+            <Rectangle id="exitCard" width="760" height="320" translation="[580,380]" color="0x1A2535FF">
+                <Label id="exitTitle" width="680" translation="[40,48]" wrap="true" color="0xFFFFFFFF"
+                       text="Exit The Reversion Archive?">
+                    <Font role="font" uri="pkg:/fonts/Montserrat-Bold.ttf" size="38" />
+                </Label>
+                <Group id="exitCancel" translation="[40,200]">
+                    <Poster id="exitCancelBg" width="320" height="72" uri="pkg:/images/btn_rounded.9.png" blendColor="0xC9A84CFF" />
+                    <Label id="exitCancelLabel" width="320" height="72" horizAlign="center" vertAlign="center" text="Cancel" color="0x0F1923FF">
+                        <Font role="font" uri="pkg:/fonts/Montserrat-Bold.ttf" size="28" />
+                    </Label>
+                </Group>
+                <Group id="exitConfirm" translation="[400,200]">
+                    <Poster id="exitConfirmBg" width="320" height="72" uri="pkg:/images/btn_rounded.9.png" blendColor="0x23324AFF" />
+                    <Label id="exitConfirmLabel" width="320" height="72" horizAlign="center" vertAlign="center" text="Exit" color="0xFFFFFFFF">
+                        <Font role="font" uri="pkg:/fonts/Montserrat-Bold.ttf" size="28" />
+                    </Label>
+                </Group>
+            </Rectangle>
+        </Group>
+
+        <!-- Measures the keyboard one frame after render (boundingRect is only
+             valid post-layout), then centers it and places the rows below. -->
+        <Timer id="layoutTimer" duration="0.05" repeat="false" />
+    </children>
+
+    <script type="text/brightscript" uri="pkg:/components/screens/SignInScreen.brs" />
+    <script type="text/brightscript" uri="pkg:/components/lib/Config.brs" />
+    <script type="text/brightscript" uri="pkg:/components/lib/Registry.brs" />
+    <script type="text/brightscript" uri="pkg:/components/lib/Api.brs" />
+</component>

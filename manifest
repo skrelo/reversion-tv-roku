@@ -14,4 +14,9 @@ splash_min_time=800
 ui_resolutions=fhd
 supports_input_launch=1
 
-bs_const=debug=true
+# Voice engine — required for in-app voice dictation into the DynamicKeyboard
+# (sign-in email/code). Without this the mic falls through to OS global search.
+requires_flite_tts=1
+requires_flite_version=2.0.0
+
+bs_const=debug=false

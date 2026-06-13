@@ -43,12 +43,18 @@
             <FloatFieldInterpolator id="fadeInInterp" key="[0,1]" keyValue="[0,1]" fieldToInterp="backdropB.opacity" />
         </Animation>
 
-        <!-- Content slide-in: the new slide's column glides in from the right
+        <!-- Content slide-in: the new slide's column glides in horizontally
              and fades up, so paging/auto-advance reads as a slideshow (the
              backdrop crossfades underneath). Mirrors Tizen's heroSlideFade. -->
         <Animation id="contentAnim" duration="0.34" easeFunction="outQuad">
             <FloatFieldInterpolator id="contentOpacInterp" key="[0,1]" keyValue="[0,1]" fieldToInterp="content.opacity" />
             <FloatFieldInterpolator id="wordmarkOpacInterp" key="[0,1]" keyValue="[0,1]" fieldToInterp="wordmark.opacity" />
+        </Animation>
+
+        <!-- Horizontal slide for content column (direction set in BRS). -->
+        <Animation id="slideAnim" duration="0.38" easeFunction="outCubic">
+            <Vector2DFieldInterpolator id="contentSlideInterp" key="[0,1]" fieldToInterp="content.translation" />
+            <Vector2DFieldInterpolator id="wordmarkSlideInterp" key="[0,1]" fieldToInterp="wordmark.translation" />
         </Animation>
     </children>
 

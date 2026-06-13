@@ -1,0 +1,82 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<!-- Search (TV_APP_SPEC §8). Left: persistent DynamicKeyboard with voice.
+     Right: live results rails (events + videos) that update as the user types.
+     Focus is explicit — the screen owns it, toggling between keyboard and
+     results zones. -->
+<component name="SearchScreen" extends="Group">
+    <interface>
+        <field id="popped" type="boolean" value="false" />
+        <field id="signedOut" type="boolean" value="false" />
+        <field id="openVideoId" type="string" value="" />
+        <field id="openEventId" type="string" value="" />
+    </interface>
+
+    <children>
+        <Rectangle id="bg" width="1920" height="1080" color="0x0F1923FF" />
+
+        <Label id="screenTitle" text="Search" translation="[150,60]" color="0xFFFFFFFF">
+            <Font role="font" uri="pkg:/fonts/Montserrat-Bold.ttf" size="42" />
+        </Label>
+
+        <!-- LEFT pane: DynamicMiniKeyboard — compact/narrow grid (numbers swap in
+             place, width never grows) AND bundles a VoiceTextEditBox, so the
+             remote mic dictates INTO our field and searches our backend instead
+             of the Roku OS global search. Per Roku docs this node is for
+             "localized in-app search" and does not trigger system search. -->
+        <!-- The DynamicMiniKeyboard node is created in BRS at init() (voice,
+             OS 11.5+ — the channel's minimum firmware). -->
+        <Group id="kbHost" translation="[80,150]" />
+
+        <!-- Discoverability hint: the keyboard traps the d-pad, so users can't
+             tell results are navigable. Shown only once results exist and the
+             keyboard still has focus. -->
+        <LayoutGroup id="navHint" translation="[80,905]" layoutDirection="horiz"
+                     vertAlignment="center" itemSpacings="[10]" visible="false">
+            <Label text="Press" color="0xC9A84CFF">
+                <Font role="font" uri="pkg:/fonts/Montserrat-SemiBold.ttf" size="24" />
+            </Label>
+            <Poster width="26" height="26" uri="pkg:/images/icons/ic_chevron_right.png" blendColor="0xC9A84CFF" />
+            <Label text="or" color="0xC9A84CFF">
+                <Font role="font" uri="pkg:/fonts/Montserrat-SemiBold.ttf" size="24" />
+            </Label>
+            <Poster width="26" height="26" uri="pkg:/images/icons/ic_chevron_down.png" blendColor="0xC9A84CFF" />
+            <Label text="to browse results" color="0xC9A84CFF">
+                <Font role="font" uri="pkg:/fonts/Montserrat-SemiBold.ttf" size="24" />
+            </Label>
+        </LayoutGroup>
+
+        <!-- RIGHT pane: results area (right of the compact keyboard, whose right
+             edge sits at ~x=656, so we start at 740 for a clear gap). -->
+        <Group id="resultsPane" translation="[740,60]">
+            <!-- Prompt / status labels (centered in the results area). -->
+            <Label id="promptLabel" translation="[0,400]" width="1120" horizAlign="center"
+                   color="0x8C9EB0FF" text="Search for meetups, livestreams, and videos">
+                <Font role="font" uri="pkg:/fonts/Montserrat-Regular.ttf" size="28" />
+            </Label>
+            <Label id="loadingLabel" translation="[0,400]" width="1120" horizAlign="center"
+                   color="0xCFD8E3FF" text="Searching..." visible="false">
+                <Font role="font" uri="pkg:/fonts/Montserrat-Regular.ttf" size="28" />
+            </Label>
+            <Label id="emptyLabel" translation="[0,400]" width="1120" horizAlign="center"
+                   color="0x8C9EB0FF" visible="false">
+                <Font role="font" uri="pkg:/fonts/Montserrat-Regular.ttf" size="28" />
+            </Label>
+            <Label id="errorLabel" translation="[0,380]" width="1120" horizAlign="center"
+                   wrap="true" color="0xFF8A8AFF" visible="false">
+                <Font role="font" uri="pkg:/fonts/Montserrat-Regular.ttf" size="28" />
+            </Label>
+
+            <!-- Rail container (events rail + videos rail, built in BRS). -->
+            <Group id="railsContent" translation="[0,0]" />
+        </Group>
+
+        <!-- Debounce timer for keyboard text changes. -->
+        <Timer id="debounceTimer" duration="0.4" repeat="false" />
+    </children>
+
+    <script type="text/brightscript" uri="pkg:/components/screens/SearchScreen.brs" />
+    <script type="text/brightscript" uri="pkg:/components/lib/Config.brs" />
+    <script type="text/brightscript" uri="pkg:/components/lib/Registry.brs" />
+    <script type="text/brightscript" uri="pkg:/components/lib/Api.brs" />
+    <script type="text/brightscript" uri="pkg:/components/lib/Models.brs" />
+</component>

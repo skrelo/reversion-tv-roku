@@ -108,9 +108,33 @@ sub updateProfile()
     initial = UCase(Left(nm, 1))
     if initial = "" then initial = "R"
     m.avatarInitial.text = initial
-    h = m.top.userHandle
-    m.profileHandle.text = nz(h)
-    m.profileHandle.visible = (nz(h) <> "")
+    h = nz(m.top.userHandle)
+    if h <> "" then
+        h = LCase(h)
+        if Left(h, 1) <> "@" then h = "@" + h
+    end if
+    m.profileHandle.text = h
+    m.profileHandle.visible = (h <> "")
+    ' Load actual profile photo when available; the placeholder circle + initial
+    ' shows through as fallback when the URL is blank or still loading.
+    photo = nz(m.top.userPhoto)
+    m.avatar = m.top.findNode("avatar")
+    m.avatarMask = m.top.findNode("avatarMask")
+    if m.avatar <> invalid then
+        if photo <> "" then
+            ' Clear the placeholder tint (blendColor would paint the real photo
+            ' dark-blue) and crop to a circle via the corner mask overlay.
+            m.avatar.blendColor = "0xFFFFFFFF"
+            m.avatar.uri = photo
+            m.avatarInitial.visible = false
+            if m.avatarMask <> invalid then m.avatarMask.visible = true
+        else
+            m.avatar.blendColor = "0x23324AFF"
+            m.avatar.uri = "pkg:/images/avatar_circle.png"
+            m.avatarInitial.visible = true
+            if m.avatarMask <> invalid then m.avatarMask.visible = false
+        end if
+    end if
 end sub
 
 ' Active item icon = gold; focused = full white; otherwise dim. Uses Poster

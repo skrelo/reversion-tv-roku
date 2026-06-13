@@ -400,6 +400,10 @@ function numOr(v as dynamic, fallback as float) as float
 end function
 
 function firstDefined(a as dynamic, b as dynamic) as dynamic
-    if a <> invalid and a <> "" then return a
-    return b
+    if a = invalid then return b
+    ' Only treat "" as undefined for strings; comparing a non-string (e.g. roInt)
+    ' to "" is a type-mismatch runtime error on real devices.
+    t = type(a)
+    if (t = "String" or t = "roString") and a = "" then return b
+    return a
 end function

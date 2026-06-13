@@ -21,6 +21,8 @@
         <field id="openVideoId" type="string" value="" />
         <!-- MainScene observes this to push the Settings screen (left-nav gear). §10 -->
         <field id="openSettings" type="boolean" value="false" />
+        <!-- MainScene observes this to push the Search screen (left-nav search). §8 -->
+        <field id="openSearch" type="boolean" value="false" />
     </interface>
 
     <children>
@@ -68,18 +70,21 @@
         <!-- Exit-confirmation overlay (§6.7). -->
         <Group id="exitDialog" visible="false">
             <Rectangle id="exitScrim" width="1920" height="1080" color="0x0A0F16E6" />
-            <Rectangle id="exitCard" width="760" height="320" translation="[580,380]" color="0x1A2535FF">
-                <Label id="exitTitle" width="680" translation="[40,48]" wrap="true" color="0xFFFFFFFF"
+            <Rectangle id="exitCard" width="760" height="400" translation="[580,340]" color="0x1A2535FF">
+                <Poster id="exitMark" width="80" height="80" translation="[340,36]"
+                        loadDisplayMode="scaleToFit"
+                        uri="pkg:/images/brand_mark_dark.png" />
+                <Label id="exitTitle" width="680" translation="[40,128]" wrap="true" horizAlign="center" color="0xFFFFFFFF"
                        text="Exit The Reversion Archive?">
                     <Font role="font" uri="pkg:/fonts/Montserrat-Bold.ttf" size="38" />
                 </Label>
-                <Group id="exitCancel" translation="[40,200]">
+                <Group id="exitCancel" translation="[40,290]">
                     <Poster id="exitCancelBg" width="320" height="72" uri="pkg:/images/btn_rounded.9.png" blendColor="0xC9A84CFF" />
                     <Label id="exitCancelLabel" width="320" height="72" horizAlign="center" vertAlign="center" text="Cancel" color="0x0F1923FF">
                         <Font role="font" uri="pkg:/fonts/Montserrat-Bold.ttf" size="28" />
                     </Label>
                 </Group>
-                <Group id="exitConfirm" translation="[400,200]">
+                <Group id="exitConfirm" translation="[400,290]">
                     <Poster id="exitConfirmBg" width="320" height="72" uri="pkg:/images/btn_rounded.9.png" blendColor="0x23324AFF" />
                     <Label id="exitConfirmLabel" width="320" height="72" horizAlign="center" vertAlign="center" text="Exit" color="0xFFFFFFFF">
                         <Font role="font" uri="pkg:/fonts/Montserrat-Bold.ttf" size="28" />

@@ -10,7 +10,7 @@
         <field id="activeId" type="string" value="home" onChange="updateActive" />
         <field id="userName" type="string" value="Account" onChange="updateProfile" />
         <field id="userHandle" type="string" value="" onChange="updateProfile" />
-        <field id="userPhoto" type="string" value="" />
+        <field id="userPhoto" type="string" value="" onChange="updateProfile" />
     </interface>
 
     <children>
@@ -21,11 +21,14 @@
 
         <!-- Profile (expanded only). -->
         <Group id="profile" translation="[36,72]" visible="false">
-            <Poster id="avatar" width="64" height="64" uri="pkg:/images/avatar_circle.png" blendColor="0x23324AFF">
+            <Poster id="avatar" width="64" height="64" loadDisplayMode="scaleToZoom" uri="pkg:/images/avatar_circle.png" blendColor="0x23324AFF">
                 <Label id="avatarInitial" width="64" height="64" horizAlign="center" vertAlign="center" color="0xC9A84CFF">
                     <Font role="font" uri="pkg:/fonts/Montserrat-Bold.ttf" size="30" />
                 </Label>
             </Poster>
+            <!-- Circle crop for the real photo: transparent center, corners
+                 colored to the nav background. Shown only with a real photo. -->
+            <Poster id="avatarMask" width="64" height="64" uri="pkg:/images/avatar_mask_nav.png" visible="false" />
             <Label id="profileName" translation="[80,8]" width="260" color="0xFFFFFFFF" maxLines="1">
                 <Font role="font" uri="pkg:/fonts/Montserrat-SemiBold.ttf" size="24" />
             </Label>

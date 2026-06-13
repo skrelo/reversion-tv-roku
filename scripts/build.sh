@@ -36,4 +36,19 @@ fi
 
 echo "==> Packaging…"
 bash scripts/package.sh
-echo "✓ Done. Sideload out/reversion-tv-roku.zip"
+
+# Auto-sideload only if a Roku device is configured (env vars or .env.roku).
+# Otherwise skip silently — the stick may not be set up yet.
+DEV_HOST="${ROKU_DEV_HOST:-}"
+if [ -z "$DEV_HOST" ] && [ -f ".env.roku" ]; then
+    DEV_HOST="$(grep -E '^ROKU_DEV_HOST=' .env.roku | head -n1 | cut -d= -f2- || true)"
+fi
+
+if [ -n "$DEV_HOST" ]; then
+    echo "==> Roku device configured ($DEV_HOST) — deploying…"
+    bash scripts/deploy.sh
+else
+    echo "✓ Done. No Roku device configured — skipping sideload."
+    echo "  Sideload manually: upload out/reversion-tv-roku.zip at http://<device-ip>"
+    echo "  Or set up .env.roku (ROKU_DEV_HOST + ROKU_DEV_PASSWORD) to auto-deploy."
+fi

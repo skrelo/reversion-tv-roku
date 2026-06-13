@@ -355,10 +355,10 @@ function roundedBg(w as integer, h as integer, color as string) as object
     return p
 end function
 
-function glyph(icon as string, size as integer, pos as object, color as string) as object
+function glyph(icon as string, size as integer, xy as object, color as string) as object
     p = CreateObject("roSGNode", "Poster")
     p.width = size : p.height = size
-    p.translation = pos
+    p.translation = xy
     p.uri = "pkg:/images/icons/" + icon
     p.blendColor = color
     return p
@@ -716,6 +716,17 @@ end function
 function StripHtml(s as dynamic) as string
     t = nz(s)
     if t = "" then return ""
+    ' Replace block-closing tags and line breaks with a space BEFORE the
+    ' char-by-char strip so "sentence.</p><p>Next" becomes "sentence. Next"
+    ' instead of "sentence.Next". Literal newlines in the source get the same
+    ' treatment via CollapseWs at the end.
+    t = ReplaceStr(t, "</p>", " ")
+    t = ReplaceStr(t, "</li>", " ")
+    t = ReplaceStr(t, "<br>", " ")
+    t = ReplaceStr(t, "<br/>", " ")
+    t = ReplaceStr(t, "<br />", " ")
+    t = ReplaceStr(t, Chr(10), " ")
+    t = ReplaceStr(t, Chr(13), " ")
     out = ""
     inTag = false
     for each ch in t.Split("")

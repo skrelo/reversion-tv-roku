@@ -278,7 +278,9 @@ sub renderSlide()
     if m.carousel.Count() = 0 then return
     if m.slideIndex > m.carousel.Count() - 1 then m.slideIndex = 0
     ev = m.carousel[m.slideIndex]
-    m.hero.slide = HeroSlideModel(ev)
+    ' Set count/index/mylist BEFORE slide — setting slide triggers render() which
+    ' calls buildDots(), and buildDots reads slideCount/slideIndex. The old order
+    ' set slide first, so dots always rendered with stale values.
     m.hero.slideCount = m.carousel.Count()
     m.hero.slideIndex = m.slideIndex
     m.hero.inMyList = isEventInList(ev)
@@ -288,6 +290,7 @@ sub renderSlide()
     else
         m.hero.focusedButton = -1
     end if
+    m.hero.slide = HeroSlideModel(ev)
 end sub
 
 function isEventInList(ev as object) as boolean
@@ -364,8 +367,9 @@ sub closeNavToContent()
         updateRailFocus()
     else
         m.zone = "hero"
+        m.heroBtn = 0
         animateHeroTo(m.HERO_EXPANDED)
-        renderSlide()
+        m.hero.focusedButton = m.heroBtn
         startAuto()
     end if
 end sub
@@ -391,7 +395,8 @@ sub onNavSelect(id as string)
     if id = "search" then
         m.nav.expanded = false : m.nav.focusedIndex = -1
         m.zone = m.prevZone
-        showToast("Search arrives in a later pass")
+        m.top.openSearch = false
+        m.top.openSearch = true
         return
     end if
     if id = "settings" then
@@ -413,11 +418,11 @@ sub enterCatalog(catalogType as string)
     m.slideIndex = 0
     animateHeroTo(m.HERO_COLLAPSED)
 
-    ' Meetups lazy-loads the full events list once. §6.7
+    ' Meetups lazy-loads the full meetup-only events list once. §6.7
     if catalogType = "meetups" and m.allEvents = invalid then
         m.eventsTask = CreateObject("roSGNode", "ApiTask")
         m.eventsTask.observeField("response", "onEventsResponse")
-        m.eventsTask.request = ApiReq().events(1, 50)
+        m.eventsTask.request = ApiReq().events(1, 50, "meetup")
         m.eventsTask.control = "RUN"
     end if
 

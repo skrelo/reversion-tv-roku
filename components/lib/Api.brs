@@ -20,16 +20,28 @@ function ApiReq() as object
             return { method: "GET", path: "/device-auth/poll?code=" + ReversionUrlEncode(code), body: invalid, needsAuth: false }
         end function
 
+        ' ── On-device email-code sign-in (no auth) — Roku on-device auth ─────
+        ' Passwordless: send a 6-char code to the account email, then exchange
+        ' email+code for a Sanctum token. Mirrors the phone app's login flow.
+        sendLoginCode: function(email as string) as object
+            return { method: "POST", path: "/login/send-code", body: { email: email }, needsAuth: false }
+        end function
+        verifyLoginCode: function(email as string, code as string, deviceName as string) as object
+            return { method: "POST", path: "/login/verify-code", body: { email: email, code: code, device_name: deviceName }, needsAuth: false }
+        end function
+
         ' ── Home / Events ────────────────────────────────────────────
         home: function() as object
             return { method: "GET", path: "/home", body: invalid, needsAuth: true }
         end function
-        events: function(page as integer, perPage as integer) as object
+        events: function(page as integer, perPage as integer, eventType as string) as object
             p = page
             if p < 1 then p = 1
             pp = perPage
             if pp < 1 then pp = 50
-            return { method: "GET", path: "/events?page=" + p.ToStr() + "&per_page=" + pp.ToStr() + "&exclude_future=1", body: invalid, needsAuth: true }
+            q = "/events?page=" + p.ToStr() + "&per_page=" + pp.ToStr() + "&exclude_future=1"
+            if eventType <> "" then q = q + "&type=" + eventType
+            return { method: "GET", path: q, body: invalid, needsAuth: true }
         end function
         event: function(id as string) as object
             return { method: "GET", path: "/events/" + id, body: invalid, needsAuth: true }
@@ -98,7 +110,24 @@ function ApiReq() as object
     }
 end function
 
+' Manual RFC 3986 percent-encoding. roUrlTransfer.Escape() is unavailable on the
+' render thread on real devices (CreateObject returns Invalid; only valid on Task
+' threads), so we encode by hand to keep this safe to call from any thread.
 function ReversionUrlEncode(s as string) as string
-    ut = CreateObject("roUrlTransfer")
-    return ut.Escape(s)
+    if s = invalid then return ""
+    unreserved = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_.~"
+    out = ""
+    ba = CreateObject("roByteArray")
+    ba.FromAsciiString(s)
+    for each b in ba
+        ch = Chr(b)
+        if Instr(1, unreserved, ch) > 0 then
+            out = out + ch
+        else
+            hex = UCase(StrI(b, 16))
+            if Len(hex) = 1 then hex = "0" + hex
+            out = out + "%" + hex
+        end if
+    end for
+    return out
 end function

@@ -146,6 +146,19 @@ def avatar_circle():
     save(img, "avatar_circle.png")
 
 
+def avatar_mask_nav():
+    """Circular crop frame for the nav profile photo: opaque corners in the nav
+    gradient base color (NAVY_NAV) with a transparent center circle. Layered ON
+    TOP of a square photo so it reads as a circle, with corners that blend into
+    the expanded nav gradient. (Settings uses a separate avatar_mask.png whose
+    corners match its panel color instead.)"""
+    s = 128
+    img = Image.new("RGBA", (s, s), (NAVY_NAV[0], NAVY_NAV[1], NAVY_NAV[2], 255))
+    d = ImageDraw.Draw(img)
+    d.ellipse([0, 0, s - 1, s - 1], fill=(0, 0, 0, 0))
+    save(img, "avatar_mask_nav.png")
+
+
 def player_glyphs():
     """White 96x96 transport glyphs for the player chrome (tinted at runtime via
     Poster.blendColor like the other ic_*.png icons). Saved into images/icons/."""
@@ -212,6 +225,9 @@ def player_glyphs():
     img = new(); d = ImageDraw.Draw(img)
     d.line([(38, 20), (62, 48), (38, 76)], fill=W, width=10, joint="curve")
     put(img, "ic_chevron_right.png")
+    img = new(); d = ImageDraw.Draw(img)
+    d.line([(20, 38), (48, 62), (76, 38)], fill=W, width=10, joint="curve")
+    put(img, "ic_chevron_down.png")
 
 
 if __name__ == "__main__":
@@ -221,5 +237,6 @@ if __name__ == "__main__":
     hero_fade()
     hero_scrim()
     avatar_circle()
+    avatar_mask_nav()
     player_glyphs()
     print("done")

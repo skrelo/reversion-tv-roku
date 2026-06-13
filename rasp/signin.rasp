@@ -1,0 +1,52 @@
+params:
+    rasp_version: 1
+    default_keypress_wait: 2
+    channel_name: The Reversion Archive
+    channel_id: dev
+steps:
+    # Launch and let the Sign In screen (and the Roku email RFI prompt) render.
+    # channel_id "dev" = the submitted build, sideloaded as the dev channel on
+    # Roku's cloud test device (matches Roku's own generated launch script).
+    # Roku's cloud test devices are slow + on a different network than our backend,
+    # so every wait here is sized for the worst case: the App Behavior Analysis bot
+    # kills the app the instant the script ends, and if the verify-code API +
+    # registry save haven't finished, the token is never persisted and the next
+    # (deep linking / content play) test launches signed-out. Pauses are durations,
+    # not extra steps — Roku's "max 10 pause steps" limit is about count, not length.
+    - launch: The Reversion Archive
+    - pause: 12
+    # Unauthenticated launch now lands on the Welcome (guest landing) screen with
+    # the "Sign In" button focused by default. Press OK to open the on-device
+    # sign-in screen (which auto-pops the Roku email RFI).
+    - press: ok
+    - pause: 8
+    # Dismiss the "share your Roku email" RFI dialog if it appears; focus then
+    # returns to the on-screen keyboard.
+    - press: back
+    - pause: 3
+    # Keyboard is focused on entry — type the account email. App Behavior Analysis
+    # replaces script-login with the reviewer email from the Test Credentials page.
+    - text: script-login
+    - pause: 2
+    # The keyboard loads focused on its right-hand function column (shift, space,
+    # backspace, back-arrow); 4 downs drop off the bottom into the "Send code"
+    # button and activate it. (Verified on-device 2026-06-12.)
+    - press: down
+    - press: down
+    - press: down
+    - press: down
+    - press: ok
+    # Wait long enough for the send-code API round-trip AND the transition to the
+    # code-entry screen to finish before typing the code (slow cloud device).
+    - pause: 15
+    # Code screen: same keyboard, but focus now sits on the back-arrow key (one up
+    # from the button row from the prior navigation), so a single down reaches
+    # "Sign in". Type the code first, then drop down and activate. (Verified.)
+    - text: script-password
+    - pause: 2
+    - press: down
+    - press: ok
+    # CRITICAL: hold the app alive long enough for verify-code -> SaveAuthToken ->
+    # Flush -> Home to complete and durably persist the token before the bot ends
+    # the script and relaunches for the deep linking / content play tests.
+    - pause: 30

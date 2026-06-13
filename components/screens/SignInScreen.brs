@@ -185,6 +185,7 @@ sub onSendResponse()
     end if
 
     data = resp.data
+    LogBeacon("sendCode", "SignIn", { ok: resp.ok, status: resp.status })
     if resp.ok = true then
         if data <> invalid and data.needs_verification = true then
             showStatus("Your email isn't verified yet. Check your inbox for a verification link, then try again.")
@@ -216,8 +217,14 @@ sub onVerifyResponse()
     end if
 
     data = resp.data
-    if resp.ok = true and data <> invalid and data.token <> invalid and data.token <> "" then
+    gotToken = (resp.ok = true and data <> invalid and data.token <> invalid and data.token <> "")
+    LogBeacon("verifyCode", "SignIn", { ok: resp.ok, status: resp.status, gotToken: gotToken })
+    if gotToken then
         SaveAuthToken(data.token)
+        ' Confirm the token is actually readable back from the registry post-Flush
+        ' (this is the value the next cold launch / deep-link test will see).
+        rb = GetAuthToken()
+        LogBeacon("tokenSaved", "SignIn", { persisted: (rb <> invalid and rb <> "") })
         m.done = true
         m.top.authed = true
         return
@@ -273,9 +280,14 @@ function buttonWidth(label as string) as integer
     return w
 end function
 
+' Buttons only show the gold "focused" fill when the button row actually owns
+' focus. While the keyboard is focused every button stays neutral, so moving
+' focus down to a button is clearly visible (cert focus-clarity + the primary
+' button no longer looks permanently selected).
 sub styleButtons()
+    inButtons = (m.zone = "buttons")
     for i = 0 to m.btnBgs.Count() - 1
-        if i = m.btnSel then
+        if inButtons and i = m.btnSel then
             m.btnBgs[i].blendColor = "0xC9A84CFF"
             m.btnLabels[i].color = "0x0F1923FF"
         else
@@ -309,6 +321,7 @@ end sub
 sub enterKeyboard()
     m.zone = "keyboard"
     m.keyboard.setFocus(true)
+    styleButtons()   ' clear any gold button fill while the keyboard is focused
 end sub
 
 sub enterButtons()
@@ -318,6 +331,7 @@ sub enterButtons()
     ' keyboard; unhandled keys still bubble up to this component's onKeyEvent —
     ' setFocus on m.top would be a no-op while the keyboard descendant has focus.
     m.buttonRow.setFocus(true)
+    styleButtons()   ' now show the gold focused fill on the selected button
 end sub
 
 ' ── Exit dialog ────────────────────────────────────────────────────────

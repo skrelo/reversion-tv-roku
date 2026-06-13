@@ -1,0 +1,42 @@
+params:
+    rasp_version: 1
+    default_keypress_wait: 2
+    channel_name: The Reversion Archive
+    channel_id: dev
+steps:
+    # Assumes the app is already signed in and launches to Home.
+    # channel_id "dev" = the submitted build (matches Roku's own launch script).
+    - launch: The Reversion Archive
+    - pause: 6
+    # On the Home hero, LEFT opens the nav only from slide 0; if the carousel has
+    # auto-advanced, LEFT steps back a slide first. Press it several times so we
+    # walk back to slide 0 and open the nav. With 4 slides the worst case is slide 3
+    # (3 LEFTs back to slide 0 + 1 to open the nav). Extra LEFTs once the nav is
+    # open are harmless no-ops.
+    - press: left
+    - press: left
+    - press: left
+    - press: left
+    - pause: 1
+    # Nav opens focused on "Home"; step down to "Settings" (pinned last) and open it.
+    # Order: Search, Home, Meetups, Livestreams, Continue, My List, Settings.
+    - press: down
+    - press: down
+    - press: down
+    - press: down
+    - press: down
+    - press: ok
+    - pause: 4
+    # Settings opens on the "Playback" tab. Step down the tab column to "Sign Out".
+    # Tabs: Playback, Account, Privacy, Info, Sign Out.
+    - press: down
+    - press: down
+    - press: down
+    - press: down
+    # RIGHT moves focus off the tab into the pane, onto the "Sign out" button;
+    # OK then activates it.
+    - press: right
+    - press: ok
+    # After sign-out the app tears down to the Welcome (guest landing) screen, the
+    # unauthenticated root. Hold briefly so the transition completes.
+    - pause: 6

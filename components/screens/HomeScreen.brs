@@ -9,6 +9,7 @@ sub init()
     m.retryBtn   = m.top.findNode("retryBtn")
     m.retryBg    = m.top.findNode("retryBg")
     m.emptyLabel = m.top.findNode("emptyLabel")
+    m.emptyState = m.top.findNode("emptyState")
     m.toast = m.top.findNode("toast")
     m.toastLabel = m.top.findNode("toastLabel")
     m.exitDialog = m.top.findNode("exitDialog")
@@ -75,6 +76,7 @@ sub loadData()
     m.loading.visible = true
     m.errorLabel.visible = false
     m.retryBtn.visible = false
+    m.emptyState.visible = false
     m.homeDone = false : m.libDone = false : m.meDone = false
     m.homeRes = invalid : m.libRes = invalid : m.meRes = invalid
 
@@ -163,11 +165,31 @@ sub maybeReady()
         m.carousel = [m.data.recentEvents[0]]
     end if
 
-    buildRails(buildHomeRails())
+    ' Authorized-but-empty: /home succeeded but there is nothing to show (no hero
+    ' slide AND no rails). Render a focusable empty state instead of a dead-end
+    ' blank screen. This is NOT the error path (handled above) nor loading. §6.1
+    homeRails = buildHomeRails()
+    if m.carousel.Count() = 0 and homeRails.Count() = 0 then
+        showAuthedEmpty()
+        return
+    end if
+
+    buildRails(homeRails)
     m.nav.activeId = "home"
     ' Start fully expanded without animating in.
     setHeroHeightImmediate(m.HERO_EXPANDED)
     returnToHero()
+end sub
+
+' Signed in but no entitled content. Show the empty state with the Refresh button
+' focused (the screen must never present nothing focusable). §6.1
+sub showAuthedEmpty()
+    m.emptyState.visible = true
+    m.zone = "empty"
+    m.nav.expanded = false
+    m.nav.focusedIndex = -1
+    m.hero.focusedButton = -1
+    m.top.setFocus(true)
 end sub
 
 function arr(v as dynamic) as object
@@ -610,6 +632,9 @@ end sub
 function onKeyEvent(key as string, press as boolean) as boolean
     if not press then return false
 
+    ' Exit prompt owns all keys while open (may sit over the error/empty states).
+    if m.exitDialog.visible then return handleExitKeys(key)
+
     ' Error state: only OK (retry) and BACK (exit prompt) are meaningful.
     if m.retryBtn.visible then
         if key = "OK" then
@@ -625,9 +650,21 @@ function onKeyEvent(key as string, press as boolean) as boolean
         return true
     end if
 
+    ' Empty state (authed, no content): OK refreshes, BACK opens the exit prompt.
+    if m.emptyState.visible then
+        if key = "OK" then
+            loadData()
+            return true
+        end if
+        if key = "back" then
+            showExit()
+            return true
+        end if
+        return true
+    end if
+
     if m.data = invalid then return false
 
-    if m.exitDialog.visible then return handleExitKeys(key)
     if m.zone = "nav" then return handleNavKeys(key)
     if m.zone = "rails" then return handleRailKeys(key)
     return handleHeroKeys(key)

@@ -6,20 +6,33 @@ sub init()
     m.stack = []
 
     ' Certification performance beacons (cert 3.2). The OS fires AppLaunchInitiate
-    ' automatically; we must fire AppLaunchComplete once the Home page is rendered.
-    ' Pairing is a login dialog shown before Home, so it gets AppDialog beacons.
-    ' Fire each only once for the launch sequence.
+    ' automatically; we must fire AppLaunchComplete once the first interactive
+    ' screen is rendered. On an unauthenticated launch that screen is Sign In (we
+    ' never reach Home until the user signs in), so AppLaunchComplete MUST fire
+    ' there too — otherwise Roku's launch-performance test waits 30s for a beacon
+    ' that never comes, times out, and fails. Fire it only once per launch.
     m.launchComplete = false
+    ' Tracks the launch-time sign-in "dialog" so its AppDialogComplete fires when
+    ' the user authenticates (brackets sign-in time out of engagement metrics).
+    m.signInDialogOpen = false
 
     ' A deep link captured before auth completes; routed once Home is up. §5
     m.pendingDeepLink = invalid
 
+    ' TEMP cert diagnostic: shared remote-logging task, reachable from any
+    ' component via m.global.debugTask (see LogBeacon in Config.brs). Created
+    ' before the auth gate so the very first beacon (launch) is captured.
+    m.debugTask = CreateObject("roSGNode", "DebugTask")
+    m.global.addFields({ debugTask: m.debugTask })
+
     ' Auth gate on boot. §2 / §5.
     token = GetAuthToken()
-    if token <> invalid and token <> "" then
+    hasToken = (token <> invalid and token <> "")
+    LogBeacon("launch", "", { hasToken: hasToken })
+    if hasToken then
         showHome()
     else
-        showSignIn()
+        showWelcome()
     end if
     ' NOTE: don't read m.top.launchArgs here — CreateScene runs init()
     ' synchronously BEFORE main.brs sets it. Cold-launch deep links arrive via
@@ -30,12 +43,18 @@ end sub
 ' Cold-launch deep link: main.brs sets launchArgs after the scene is created,
 ' so this observer (not init) is where we first see it.
 sub onLaunchArgs()
-    if m.top.launchArgs <> invalid then routeDeepLink(m.top.launchArgs)
+    if m.top.launchArgs <> invalid then
+        LogBeacon("launchArgs", "", { contentId: ciGet(m.top.launchArgs, "contentid"), mediaType: ciGet(m.top.launchArgs, "mediatype") })
+        routeDeepLink(m.top.launchArgs)
+    end if
 end sub
 
 ' roInput delivered a deep link while we're running (main.brs forwards it).
 sub onInputArgs()
-    if m.top.inputArgs <> invalid then routeDeepLink(m.top.inputArgs)
+    if m.top.inputArgs <> invalid then
+        LogBeacon("inputArgs", "", { contentId: ciGet(m.top.inputArgs, "contentid"), mediaType: ciGet(m.top.inputArgs, "mediatype") })
+        routeDeepLink(m.top.inputArgs)
+    end if
 end sub
 
 ' Validate contentId + mediaType (case-insensitive keys) and open the content.
@@ -51,8 +70,10 @@ sub routeDeepLink(args as object)
     token = GetAuthToken()
     if token = invalid or token = "" then
         m.pendingDeepLink = { contentId: contentId, mediaType: mediaType }
+        LogBeacon("deepLink", "", { contentId: contentId, mediaType: mediaType, authed: false, action: "deferred-signin" })
         return
     end if
+    LogBeacon("deepLink", "", { contentId: contentId, mediaType: mediaType, authed: true, action: "route" })
 
     ' Make sure we're at the Home root before pushing content over it.
     if m.stack.Count() = 0 or m.stack[0].subtype() <> "HomeScreen" then showHome()
@@ -96,18 +117,53 @@ sub resetTo(nodeName as string)
     node.setFocus(true)
 end sub
 
+' Guest landing for unauthenticated users (§5 Platform note). This is the first
+' interactive UI on an unauthenticated launch, so it carries AppLaunchComplete
+' (cert 3.2). The whole pre-auth gate (Welcome + Sign In) blocks content, so we
+' open the AppDialog span here; it closes when the user signs in (onAuthed),
+' bracketing sign-in time out of engagement metrics. A re-show after sign-out is
+' not a launch → fires nothing.
+sub showWelcome()
+    isLaunch = not m.launchComplete
+    LogBeacon("screen", "Welcome", { isLaunch: isLaunch })
+    resetTo("WelcomeScreen")
+    topScreen().observeField("signIn", "onWelcomeSignIn")
+    topScreen().observeField("exitApp", "onExitApp")
+    if isLaunch then
+        m.top.signalBeacon("AppLaunchComplete")
+        m.launchComplete = true
+        m.top.signalBeacon("AppDialogInitiate")
+        m.signInDialogOpen = true
+    end if
+end sub
+
+' Welcome → user chose Sign In: swap in the on-device sign-in screen. Launch +
+' AppDialog beacons already fired on Welcome, so showSignIn no-ops them.
+sub onWelcomeSignIn()
+    w = topScreen()
+    if w <> invalid and w.signIn = true then showSignIn()
+end sub
+
 sub showSignIn()
-    ' Sign-in is a login dialog shown before Home → AppDialog beacons (cert 3.2).
-    ' Only the launch-time sign-in counts; a later re-auth (after sign-out) skips it.
-    fireDialog = not m.launchComplete
-    if fireDialog then m.top.signalBeacon("AppDialogInitiate")
+    ' Reached from the Welcome landing (or after sign-out). The launch +
+    ' AppDialogInitiate beacons fire on Welcome, so isLaunch is already false here
+    ' and this no-ops them; the guard remains so a direct first-screen sign-in
+    ' (should the Welcome step ever be removed) still carries the launch beacons.
+    isLaunch = not m.launchComplete
+    LogBeacon("screen", "SignIn", { isLaunch: isLaunch })
     resetTo("SignInScreen")
     topScreen().observeField("authed", "onAuthed")
     topScreen().observeField("exitApp", "onExitApp")
-    if fireDialog then m.top.signalBeacon("AppDialogComplete")
+    if isLaunch then
+        m.top.signalBeacon("AppLaunchComplete")
+        m.launchComplete = true
+        m.top.signalBeacon("AppDialogInitiate")
+        m.signInDialogOpen = true
+    end if
 end sub
 
 sub showHome()
+    LogBeacon("screen", "Home", invalid)
     resetTo("HomeScreen")
     home = topScreen()
     home.observeField("signedOut", "onSignedOut")
@@ -117,7 +173,8 @@ sub showHome()
     home.observeField("openSettings", "onOpenSettings")
     home.observeField("openSearch", "onOpenSearch")
 
-    ' Home is the fully-rendered launch UI → AppLaunchComplete (cert 3.2), once.
+    ' If the user was already authed at boot, Home is the first launch UI →
+    ' AppLaunchComplete here (cert 3.2). On the sign-in path it already fired.
     if not m.launchComplete then
         m.top.signalBeacon("AppLaunchComplete")
         m.launchComplete = true
@@ -163,6 +220,7 @@ sub onOpenEvent()
 end sub
 
 sub pushEvent(eventId as string)
+    LogBeacon("screen", "EventDetail", { eventId: eventId })
     node = CreateObject("roSGNode", "EventDetailScreen")
     node.eventId = eventId
     node.observeField("popped", "onScreenPopped")
@@ -176,6 +234,7 @@ end sub
 
 ' Push the Player onto the stack. §9
 sub pushPlayer(videoId as string)
+    LogBeacon("screen", "Player", { videoId: videoId })
     node = CreateObject("roSGNode", "PlayerScreen")
     node.videoId = videoId
     node.observeField("popped", "onScreenPopped")
@@ -270,6 +329,12 @@ end sub
 sub onAuthed()
     p = topScreen()
     if p <> invalid and p.authed = true then
+        LogBeacon("authed", "", { hasToken: (GetAuthToken() <> invalid and GetAuthToken() <> "") })
+        ' Close the launch-time sign-in dialog span (cert 3.2) before Home.
+        if m.signInDialogOpen = true then
+            m.top.signalBeacon("AppDialogComplete")
+            m.signInDialogOpen = false
+        end if
         showHome()
         ' Run any deep link the user arrived with before signing in. §5
         if m.pendingDeepLink <> invalid then
@@ -284,10 +349,12 @@ sub onAuthed()
     end if
 end sub
 
-' A 401 anywhere → token dead → tear down everything and go to Sign-in. §2
+' A 401 anywhere → token dead → tear down everything and go to the Welcome
+' landing (the unauthenticated root). §2 / §5
 sub onSignedOut()
+    LogBeacon("signedOut", "", invalid)
     ClearAuthToken()
-    showSignIn()
+    showWelcome()
 end sub
 
 ' Global key routing. Screens handle their own keys first (focus chain);

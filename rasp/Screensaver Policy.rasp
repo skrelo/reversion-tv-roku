@@ -1,0 +1,12 @@
+params:
+  rasp_version: 1
+  default_keypress_wait: 2
+  channel_name: The Reversion Archive
+  channel_id: dev
+steps:
+  - launch:
+      channel_name: The Reversion Archive
+      media_type: episode
+      content_id: 25
+      query: contentID=25&mediatype=episode
+  - wait_for_player_state: play

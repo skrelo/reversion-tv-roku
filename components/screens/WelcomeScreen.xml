@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<!-- Guest landing shown to unauthenticated users BEFORE the sign-in keyboard
+     (TV_APP_SPEC §5 Platform note). Mirrors the pattern used by major streaming
+     apps: a branded welcome with a clear Sign In affordance plus a note on where
+     to get access (there is no in-app signup), instead of dropping the user
+     straight onto the on-screen keyboard. The screen owns focus and routes keys;
+     the two pill buttons render their highlight from m.sel (§12). -->
+<component name="WelcomeScreen" extends="Group">
+    <interface>
+        <field id="signIn" type="boolean" value="false" />
+        <field id="exitApp" type="boolean" value="false" />
+    </interface>
+
+    <children>
+        <Rectangle id="bg" width="1920" height="1080" color="0x0F1923FF" />
+        <!-- Hero backdrop so the landing isn't flat navy. The image is masked by a
+             navy darken layer + bottom fade so the centered wordmark/copy/buttons
+             stay legible (same legibility approach as the Home hero, §6.3). -->
+        <Poster id="bgImage" width="1920" height="1080" uri="pkg:/images/home_bg_fhd.jpg" loadDisplayMode="scaleToZoom" />
+        <Rectangle id="darken" width="1920" height="1080" color="0x0F1923C0" />
+        <Poster id="fade" width="1920" height="918" translation="[0,162]" uri="pkg:/images/hero_fade.png" />
+
+        <!-- Transparent brand lockup, top-left (mirrors SignIn/§5). -->
+        <Poster id="brand" uri="pkg:/images/brand_lockup.png" translation="[96,64]"
+                width="300" height="116" loadDisplayMode="scaleToFit" />
+
+        <Label id="title" text="Welcome" translation="[0,360]" width="1920" horizAlign="center" color="0xFFFFFFFF">
+            <Font role="font" uri="pkg:/fonts/Montserrat-Bold.ttf" size="56" />
+        </Label>
+        <Label id="subtitle" translation="[360,452]" width="1200" horizAlign="center" wrap="true" maxLines="2" color="0xF0EBE3FF"
+               text="Sign in to watch talks, meetups, and livestreams from The Reversion Archive.">
+            <Font role="font" uri="pkg:/fonts/Montserrat-Regular.ttf" size="30" />
+        </Label>
+        <Label id="helper" translation="[360,548]" width="1200" horizAlign="center" wrap="true" maxLines="2" color="0x8C9EB0FF"
+               text="New here? Visit reversion.app to get access, then sign in.">
+            <Font role="font" uri="pkg:/fonts/Montserrat-Regular.ttf" size="26" />
+        </Label>
+
+        <!-- Button row: Sign In (default) + Exit. -->
+        <Group id="signInBtn" translation="[640,648]">
+            <Poster id="signInBg" width="300" height="72" uri="pkg:/images/btn_rounded.9.png" blendColor="0xC9A84CFF" />
+            <Label id="signInLabel" width="300" height="72" horizAlign="center" vertAlign="center" text="Sign In" color="0x0F1923FF">
+                <Font role="font" uri="pkg:/fonts/Montserrat-Bold.ttf" size="28" />
+            </Label>
+        </Group>
+        <Group id="exitBtn" translation="[980,648]">
+            <Poster id="exitBg" width="300" height="72" uri="pkg:/images/btn_rounded.9.png" blendColor="0x23324AFF" />
+            <Label id="exitLabel" width="300" height="72" horizAlign="center" vertAlign="center" text="Exit" color="0xFFFFFFFF">
+                <Font role="font" uri="pkg:/fonts/Montserrat-Bold.ttf" size="28" />
+            </Label>
+        </Group>
+    </children>
+
+    <script type="text/brightscript" uri="pkg:/components/screens/WelcomeScreen.brs" />
+</component>

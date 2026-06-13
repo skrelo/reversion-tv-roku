@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<!-- TEMPORARY cert diagnostic. Fire-and-forget remote logging sink: beacons are
+     appended to the `beacon` queue (an array) by LogBeacon and POSTed to
+     /api/mobile/tv-debug (mirrored to Slack with a server timestamp). It's an
+     append-only queue (not a single slot) so cold-start beacons fired before the
+     task thread registers its observer aren't lost — the task drains the whole
+     queue on startup, then by index on each notify. Single writer (all UI
+     components share the render thread). Remove this node + LogBeacon + the
+     backend route before final cert. -->
+<component name="DebugTask" extends="Task">
+    <interface>
+        <field id="beacon" type="array" alwaysNotify="true" />
+    </interface>
+    <script type="text/brightscript" uri="pkg:/components/tasks/DebugTask.brs" />
+    <script type="text/brightscript" uri="pkg:/components/lib/Config.brs" />
+</component>

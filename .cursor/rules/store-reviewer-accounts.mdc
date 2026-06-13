@@ -1,0 +1,46 @@
+---
+description: Store-review (Amazon/Google/Samsung/Apple/Roku) reviewer accounts, static sign-in code, and activation steps — do not re-ask the user
+alwaysApply: true
+---
+
+# Store reviewer accounts + static sign-in code
+
+When writing **store/channel tester instructions / review notes / demo-account
+credentials** for any platform, use the facts below. **Do not ask the user for
+this again** — it is fixed.
+
+## Reviewer accounts
+
+- Emails: `reviewer@reversion.app` (primary), plus `reviewer1@reversion.app`
+  … `reviewer5@reversion.app` for parallel reviewers.
+- Any `@reversion.app` email is auto-flagged `is_review_account = true` (and
+  `special_access = true`) in the backend, which **bypasses the entitlement
+  gate** — so these accounts see real content instead of an empty home.
+
+## Static sign-in code (no email sent)
+
+- Sign-in is **passwordless email-code**. For any reviewer account, the login
+  code is the fixed value **`4TGW6D`** (`MOBILE_REVIEW_FIXED_CODE`).
+- Entering `4TGW6D` always works and **sends no email** — reviewers don't need
+  inbox access.
+
+## Roku-specific activation (on-device email-code sign-in)
+
+- Roku does **not** use QR/code pairing (cert prohibits off-device linking). On
+  the `SignInScreen`, the reviewer enters email `reviewer@reversion.app`, then the
+  code **`4TGW6D`** on the on-screen keyboard. No phone, no website needed.
+- Other platforms (Fire TV / Android TV / Tizen / Apple TV) use Welcome → Sign In
+  → pairing code + QR → `reversion.app/activate`, then the same reviewer email +
+  `4TGW6D`.
+
+## Why this matters
+
+- A **brand-new** account has no content by design and shows the "Nothing here
+  yet" empty state. Reviewers who create their own account think the app is
+  broken — **always tell them to use the reviewer credentials above and not
+  create a new account.**
+
+## Source of truth
+
+- Backend: `is_review_account` / `special_access` flags + `MOBILE_REVIEW_FIXED_CODE`
+  in the `reversion` repo. If these values ever change there, update this rule.

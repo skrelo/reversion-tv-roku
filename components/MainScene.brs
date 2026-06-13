@@ -21,13 +21,18 @@ sub init()
     else
         showSignIn()
     end if
-
-    ' Deep link on cold launch (cert RP 5.x). Stash it; routeDeepLink runs it now
-    ' if we're already Home, or defers until sign-in completes.
-    if m.top.launchArgs <> invalid then routeDeepLink(m.top.launchArgs)
+    ' NOTE: don't read m.top.launchArgs here — CreateScene runs init()
+    ' synchronously BEFORE main.brs sets it. Cold-launch deep links arrive via
+    ' the onLaunchArgs observer below.
 end sub
 
 ' ── Deep linking (cert RP 5.x) ─────────────────────────────────────────
+' Cold-launch deep link: main.brs sets launchArgs after the scene is created,
+' so this observer (not init) is where we first see it.
+sub onLaunchArgs()
+    if m.top.launchArgs <> invalid then routeDeepLink(m.top.launchArgs)
+end sub
+
 ' roInput delivered a deep link while we're running (main.brs forwards it).
 sub onInputArgs()
     if m.top.inputArgs <> invalid then routeDeepLink(m.top.inputArgs)

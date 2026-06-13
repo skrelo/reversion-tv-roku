@@ -23,6 +23,26 @@ sub Main(args as dynamic)
     input = CreateObject("roInput")
     input.setMessagePort(port)
 
+    ' Memory monitoring (cert Monitoring requirements). Prefer the cgroup-based
+    ' roAppMemoryMonitor (threshold warnings + per-app limits); fall back to the
+    ' older roDeviceInfo low-general-memory event on devices that lack it. Both
+    ' feed our shared port; the loop below reacts to the notifications.
+    memMon = CreateObject("roAppMemoryMonitor")
+    usingMemMon = false
+    if memMon <> invalid then
+        memMon.setMessagePort(port)
+        usingMemMon = memMon.EnableMemoryWarningEvent(true)
+        ' Exercise the query APIs (useful for debugging headroom, and required
+        ' by the cert Monitoring checks): per-app limit, free estimate, usage %.
+        limits = memMon.GetChannelMemoryLimit()
+        availKb = memMon.GetChannelAvailableMemory()
+        usagePct = memMon.GetMemoryLimitPercent()
+        if limits <> invalid then print "[mem] limit="; limits; " availKb="; availKb; " usage%="; usagePct
+    end if
+    devInfo = CreateObject("roDeviceInfo")
+    devInfo.setMessagePort(port)
+    if not usingMemMon then devInfo.EnableLowGeneralMemoryEvent(true)
+
     ' The exit-confirmation overlay (§6.7) sets this when the user picks Exit;
     ' closing the screen ends the channel (Roku has no direct quit API).
     scene.observeField("exitApp", port)
@@ -36,6 +56,15 @@ sub Main(args as dynamic)
             if msg.isInput() then
                 info = msg.getInfo()
                 if info <> invalid then scene.setField("inputArgs", info)
+            end if
+        else if msgType = "roAppMemoryNotificationEvent" then
+            ' Usage crossed a threshold (80/85/90/95%). We hold little reclaimable
+            ' cache, so just log; the OS throttles these. cert Monitoring.
+            print "[mem] usage% ="; msg.getInfo().lookup("MemoryUsagePercent")
+        else if msgType = "roDeviceInfoEvent" then
+            mi = msg.getInfo()
+            if mi <> invalid and mi.generalMemoryLevel <> invalid then
+                print "[mem] generalMemoryLevel ="; mi.generalMemoryLevel
             end if
         else if msgType = "roSGNodeEvent" then
             if msg.getField() = "exitApp" and msg.getData() = true then

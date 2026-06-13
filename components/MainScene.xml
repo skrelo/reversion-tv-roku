@@ -4,8 +4,10 @@
 <component name="MainScene" extends="Scene">
     <interface>
         <!-- Deep link parameters: launchArgs = launched-from-cold, inputArgs =
-             delivered via roInput while already running (cert RP 5.x). -->
-        <field id="launchArgs" type="assocarray" />
+             delivered via roInput while already running (cert RP 5.x). Both route
+             via onChange — CreateScene runs init() synchronously BEFORE main.brs
+             sets launchArgs, so init can't read it; the observer fires when set. -->
+        <field id="launchArgs" type="assocarray" onChange="onLaunchArgs" />
         <field id="inputArgs" type="assocarray" onChange="onInputArgs" />
         <field id="exitApp" type="boolean" value="false" />
     </interface>
